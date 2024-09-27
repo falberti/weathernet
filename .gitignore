@@ -1,3 +1,6 @@
+# All passwords and secrets
+*.pem
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
