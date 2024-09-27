@@ -5,6 +5,8 @@
 import struct
 import time
 from smbus2 import SMBus
+import sqlite3
+import datetime
 
 from i2cdevice import BitField, Device, Register, _int_to_bytes
 from i2cdevice.adapter import Adapter, LookupAdapter
@@ -12,6 +14,8 @@ from i2cdevice.adapter import Adapter, LookupAdapter
 CHIP_ID = 0x58
 I2C_ADDRESS_GND = 0x77
 I2C_ADDRESS_VCC = 0x76
+
+PROBE_SENSOR_SECONDS = 60
 
 
 class S16Adapter(Adapter):
@@ -219,7 +223,22 @@ if __name__ == "__main__":
     bmp280 = BMP280(i2c_dev=bus)
 
     while True:
+        now = int(datetime.datetime.now().timestamp())
         temperature = bmp280.get_temperature()
         pressure = bmp280.get_pressure()
-        print(f"{temperature:05.2f}*C {pressure:05.2f}hPa")
-        time.sleep(1)
+
+        done = False
+        while not done:
+            try:
+                con = sqlite3.connect("local.sqlite3")
+                cur = con.cursor()
+                query = "INSERT INTO bmp280 VALUES ({},{:.2f},{:.2f})".format(now, temperature, pressure)
+                cur.execute(query)
+                con.commit()
+                done = True
+            except sqlite3.OperationalError as e:
+                pass
+                # try again to connect
+                time.sleep(1)
+
+        time.sleep(PROBE_SENSOR_SECONDS)
