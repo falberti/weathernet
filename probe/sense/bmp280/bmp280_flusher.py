@@ -4,6 +4,7 @@ import psycopg2
 import os
 import sqlite3
 import random
+import time
 
 SLEEP_MIN = 20
 SLEEP_MAX = 120
@@ -40,7 +41,6 @@ while True:
         timescale_conn.commit()
         sqlite3_conn.commit()
         sqlite3_conn.close()
-        break
     except sqlite3.OperationalError as e:
         print(e)
         pass
