@@ -218,11 +218,11 @@ class BMP280:
         return altitude
 
 if __name__ == "__main__":
-    # Initialise the BMP280
-    bus = SMBus(1)
-    bmp280 = BMP280(i2c_dev=bus)
-
     while True:
+        # Initialise the BMP280
+        bus = SMBus(1)
+        bmp280 = BMP280(i2c_dev=bus)
+
         now = int(datetime.datetime.now().timestamp())
         temperature = bmp280.get_temperature()
         pressure = bmp280.get_pressure()
@@ -241,4 +241,5 @@ if __name__ == "__main__":
                 # try again to connect
                 time.sleep(1)
 
+        bus.close()
         time.sleep(PROBE_SENSOR_SECONDS)
