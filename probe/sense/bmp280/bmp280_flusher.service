@@ -1,0 +1,16 @@
+# Link as
+# $ sudo ln -s /home/francesco/weather/probe/sense/bmp280/bmp280_flusher.service /lib/systemd/system/bmp280_flusher.service
+[Unit]
+Description=BMP280 flusher script
+After=network.target
+
+[Service]
+Type=simple
+User=francesco
+WorkingDirectory=/home/francesco/weather/probe/sense/bmp280/
+ExecStart=/home/francesco/weather/probe/sense/bmp280/bmp280/bin/python3 bmp280_flusher.py
+EnvironmentFile=/home/francesco/weather/probe/sense/bmp280/bmp280_flusher.env
+Restart=on-failure # or always, on-abort, etc
+
+[Install]
+WantedBy=multi-user.target
