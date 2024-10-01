@@ -1,3 +1,4 @@
 i2cdevice
 sqlite3
 smbus2
+psycopg2
