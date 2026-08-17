@@ -54,6 +54,16 @@ if [[ ! -d "${VENV_DIR}" ]]; then
   python3 -m venv "${VENV_DIR}"
 fi
 
+# psutil almost always has no prebuilt wheel for a Pi's exact
+# Python-version/arch combination and falls back to compiling from
+# source -- which fails without Python's headers and a compiler. Install
+# both before pip ever gets a chance to need them, rather than letting
+# the build fail first.
+if command -v apt-get >/dev/null 2>&1; then
+  log "Installing build dependencies (needed to compile psutil's C extension)"
+  sudo apt-get update && sudo apt-get install -y python3-dev build-essential
+fi
+
 log "Installing probe dependencies"
 "${VENV_DIR}/bin/pip" install --quiet --upgrade pip
 "${VENV_DIR}/bin/pip" install --quiet -r "${PROBE_DIR}/requirements.txt"
