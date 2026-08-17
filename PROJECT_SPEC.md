@@ -906,6 +906,24 @@ A `config/probe.example.yaml` documenting the schema is still worth
 shipping for reference/manual editing later, but it is not part of the
 normal setup path anymore.
 
+**`enroll.py` must also clear the spool (`spool_path`, default
+`/var/lib/weathernet-probe/spool.jsonl`) as part of every enrollment,
+including a re-enrollment of an already-set-up probe.** Every spooled
+entry carries its own `probe_id`, fixed at the moment it was queued. A
+(re-)enrollment always assigns a *new* `probe_id`, so any entry already
+in the spool becomes permanently unsendable the instant enrollment
+finishes -- the server 403s a `probe_id`/certificate mismatch (Section
+7.2), and there is no way to make it match again, the certificate that
+could have matched it was just overwritten. This is worse than it
+sounds: `transport.py` sends the spool oldest-first and stops at the
+first failure (Section 6.4), so leaving stale entries in place doesn't
+just waste retries on those entries -- it permanently blocks *every*
+subsequent reading too, since they can never get past the stuck stale
+entry at the front of the queue. Hit for real during a routine
+re-enrollment: the probe looked healthy (valid cert, WireGuard up) but
+`last_seen_at` never updated, and the actual cause (spool blocked on
+stale entries) was one layer behind the first error the logs showed.
+
 ### 6.7 WireGuard setup on the probe
 
 Folded into `probe/scripts/enroll.py` as of Section 5.7 — there's no

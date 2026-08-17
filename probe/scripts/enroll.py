@@ -24,6 +24,7 @@ CONFIG_DIR = Path("/etc/weathernet-probe")
 CERTS_DIR = CONFIG_DIR / "certs"
 WIREGUARD_DIR = Path("/etc/wireguard")
 WIREGUARD_CONFIG_PATH = WIREGUARD_DIR / "wg0.conf"
+SPOOL_PATH = Path("/var/lib/weathernet-probe/spool.jsonl")
 
 DEFAULT_SENSORS = ["mock_temperature", "mock_humidity", "mock_pressure"]
 
@@ -132,7 +133,7 @@ def write_probe_yaml(probe_id, hardware_type, server_url, client_key_path, repor
         "ca_cert_path": str(CERTS_DIR / "ca.cert.pem"),
         "report_interval_seconds": report_interval_seconds,
         "sensors": DEFAULT_SENSORS,
-        "spool_path": "/var/lib/weathernet-probe/spool.jsonl",
+        "spool_path": str(SPOOL_PATH),
         "spool_max_days": 14,
         "log_path": "/var/log/weathernet-probe/probe.log",
     }
@@ -157,6 +158,23 @@ def write_wireguard_config(wg_private_key, wg):
     )
     WIREGUARD_CONFIG_PATH.write_text(wg_conf)
     WIREGUARD_CONFIG_PATH.chmod(0o600)
+
+
+def clear_stale_spool() -> None:
+    """Drop any queued-but-unsent readings from a previous enrollment.
+
+    Every spooled entry carries its own `probe_id`, baked in at the time
+    it was queued. Once enrollment assigns a *new* probe_id, the server
+    will 403 those old entries forever (probe_id/certificate mismatch --
+    the certificate that could have matched them no longer exists, it
+    was just overwritten). Worse than just wasted retries: the daemon
+    sends the spool oldest-first and stops at the first failure, so
+    leaving stale entries in place would permanently block *every*
+    future reading too, not just the stale ones.
+    """
+    if SPOOL_PATH.exists():
+        SPOOL_PATH.unlink()
+        print(f"Cleared {SPOOL_PATH} (held readings queued under the previous identity)")
 
 
 def install_authorized_key(ssh_user: str, public_key: str) -> None:
@@ -262,6 +280,7 @@ def enroll(server: str, token: str, fingerprint: str | None, ssh_user: str | Non
         report_interval_seconds=data["report_interval_seconds"],
     )
     write_wireguard_config(wg_private_key, data["wireguard"])
+    clear_stale_spool()
 
     print(f"Wrote {CONFIG_DIR / 'probe.yaml'} and {WIREGUARD_CONFIG_PATH}")
     print(f"WireGuard tunnel IP: {data['wireguard']['tunnel_ip']}")
