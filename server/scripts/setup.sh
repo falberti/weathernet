@@ -55,7 +55,13 @@ if [[ ! -f .env ]]; then
   mv .env.tmp .env
   log "Generated a fresh Django secret key and random passwords in .env"
 else
-  log ".env already exists, leaving it as-is"
+  log ".env already exists -- backfilling any new keys added to .env.example since it was created"
+  while IFS='=' read -r key value; do
+    if ! grep -q "^${key}=" .env; then
+      log "  adding new key: ${key}"
+      echo "${key}=${value}" >> .env
+    fi
+  done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env.example)
 fi
 
 # shellcheck disable=SC1091
