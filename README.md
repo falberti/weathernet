@@ -12,14 +12,14 @@ and hardware types later without a rewrite.
 ## Architecture
 
 ```
-                          ┌───────────────────────────────────────────────────┐
-                          │  Server VM (public IP, no DNS)                    │
-                          │                                                    │
+                          ┌──────────────────────────────────────────────────┐
+                          │  Server VM (public IP, no DNS)                   │
+                          │                                                  │
   ┌──────────┐  mTLS      │  ┌────────┐   verified    ┌────────┐             │
   │  Probe   │───────────▶│  │ nginx  │──cert CN hdr─▶│ django │             │
   │ (RPi,    │  HTTPS/443 │  │ (TLS + │               │        │──┐          │
   │ systemd, │            │  │ mTLS   │               └────────┘  │writes    │
-  │ no       │            │  │ term.) │                            ▼          │
+  │ no       │            │  │ term.) │                           ▼          │
   │ Docker)  │            │  └────────┘               ┌────────────────────┐ │
   └──────────┘            │                           │ postgres +         │ │
                           │                           │ timescaledb ext.   │ │
@@ -32,7 +32,7 @@ and hardware types later without a rewrite.
                           │                                 ┌────────┐       │
                           │                                 │ grafana│       │
                           │                                 └────────┘       │
-                          └───────────────────────────────────────────────────┘
+                          └──────────────────────────────────────────────────┘
 ```
 
 Every telemetry payload goes `probe → nginx (mTLS termination) → Django
