@@ -42,6 +42,7 @@ openssl req -new -key "${KEY}" -out "${CSR}" -subj "/O=WeatherNet/CN=${PUBLIC_IP
 cat > "${EXT_FILE}" <<EOF
 subjectAltName = IP:${PUBLIC_IP}
 extendedKeyUsage = serverAuth
+keyUsage = critical,digitalSignature,keyEncipherment
 EOF
 
 openssl x509 -req -in "${CSR}" -CA "${CA_CERT}" -CAkey "${CA_KEY}" -CAcreateserial \

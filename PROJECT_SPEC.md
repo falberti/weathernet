@@ -480,11 +480,29 @@ runs by hand for every probe.
 - `pki/generate-ca.sh` — run once at server setup. Creates a self-signed
   internal CA (key + cert). This CA's only job is signing probe client
   certs and the server cert; it is never meant to be trusted by browsers.
+  **Must** generate it with explicit `-addext "basicConstraints=critical,CA:true"`
+  and `-addext "keyUsage=critical,keyCertSign,cRLSign"`, not a bare
+  `openssl req -x509`. A CA cert without an explicit `keyUsage`
+  extension verifies fine with some TLS clients (plain `openssl
+  s_client`, a bare `ssl.SSLContext`) and fails outright with others
+  (`requests`/urllib3 -- which is what the probe uses, see
+  `transport.py`) with `certificate verify failed: CA cert does not
+  include key usage extension`. This was hit for real: it looked
+  correct in ad hoc verification and only failed once an actual probe
+  tried to authenticate. Reproduced and confirmed fixed with a bare
+  `requests.get(..., verify=ca_cert)` against a throwaway TLS server
+  before trusting the fix.
 - `pki/generate-server-cert.sh` — generates the server's TLS cert/key,
   signed by the internal CA, **with the server's public IP as a Subject
   Alternative Name** (there is no DNS name to use — the script must take
   the IP as an argument and fail loudly if it's not provided; don't assume
-  `localhost` or guess). Also prints the certificate's SHA-256 fingerprint
+  `localhost` or guess), and with an explicit `keyUsage = critical,
+  digitalSignature,keyEncipherment` extension alongside
+  `extendedKeyUsage = serverAuth` (for the same reason as the CA's
+  `keyUsage` above -- the probe-issued client certs, signed via
+  `probes/ca.py`'s `cryptography`-based signing, already set this
+  correctly; only the bash+openssl-generated CA and server certs were
+  missing it). Also prints the certificate's SHA-256 fingerprint
   (`openssl x509 -noout -fingerprint -sha256 -in server.crt`) — the
   operator needs this once, to give to the enrollment script for TLS
   pinning (Section 5.7).
