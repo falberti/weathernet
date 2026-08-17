@@ -3,9 +3,9 @@
   "uid": "weathernet-health",
   "title": "WeatherNet Health",
   "tags": ["weathernet"],
-  "timezone": "utc",
+  "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "1m",
   "time": { "from": "now-24h", "to": "now" },
   "panels": [

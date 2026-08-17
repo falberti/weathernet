@@ -110,7 +110,12 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+# Storage stays UTC regardless of this setting (USE_TZ=True means
+# TimescaleDB's TIMESTAMPTZ columns are always UTC internally) -- this
+# only controls the timezone Django Admin/templates render datetimes
+# in. Europe/Rome instead of a fixed UTC+2 offset so DST transitions
+# are handled from the IANA database, not hardcoded.
+TIME_ZONE = "Europe/Rome"
 USE_I18N = True
 USE_TZ = True
 
