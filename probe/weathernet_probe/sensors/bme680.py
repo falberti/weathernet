@@ -15,6 +15,7 @@ on a dev machine or CI runner with no I2C bus at all. Only actually
 SensorReadError, not importing this file.
 """
 import threading
+import time
 
 from .base import Sensor, SensorReadError
 
@@ -37,6 +38,21 @@ _device_lock = threading.Lock()
 # generic failure.
 _GAS_HEATER_TEMPERATURE_C = 320
 _GAS_HEATER_DURATION_MS = 150
+
+# One forced-mode conversion produces all four values at once. Our four
+# Sensor subclasses each call _read_all() independently, so without
+# caching, one reporting cycle triggers four separate hardware
+# conversions milliseconds apart -- each new trigger interrupts the
+# previous one still in flight, so whichever call lands mid-conversion
+# sees get_sensor_data() report no fresh data yet. Caching the reading
+# for a few seconds means only the first call each cycle touches the
+# hardware; the rest correctly reuse that same physical sample instead
+# of racing new ones. 5s comfortably covers the four back-to-back reads
+# within one cycle while staying far short of the 300s+ gap between
+# reporting cycles, so every cycle still gets a genuinely fresh read.
+_CACHE_TTL_SECONDS = 5
+_cached_data = None
+_cached_at = 0.0
 
 
 def _get_device():
@@ -65,10 +81,17 @@ def _get_device():
 
 
 def _read_all():
+    global _cached_data, _cached_at
     device = _get_device()
-    if not device.get_sensor_data():
-        raise SensorReadError("BME680 did not return fresh data this cycle")
-    return device.data
+    with _device_lock:
+        now = time.monotonic()
+        if _cached_data is not None and (now - _cached_at) < _CACHE_TTL_SECONDS:
+            return _cached_data
+        if not device.get_sensor_data():
+            raise SensorReadError("BME680 did not return fresh data this cycle")
+        _cached_data = device.data
+        _cached_at = now
+        return _cached_data
 
 
 class BME680TemperatureSensor(Sensor):
