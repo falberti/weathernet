@@ -102,6 +102,14 @@ docker compose exec -T django python manage.py migrate --noinput
 log "Collecting static files for Django Admin"
 docker compose exec -T django python manage.py collectstatic --noinput
 
+# WhiteNoise indexes STATIC_ROOT once, at process startup (production
+# mode has no autorefresh) -- collectstatic just now wrote files into a
+# directory the already-running gunicorn workers scanned before those
+# files existed. Without this restart, /static/* 404s until something
+# else happens to recreate the django container.
+log "Restarting django so it picks up the newly-collected static files"
+docker compose restart django
+
 log "Ensuring the read-only Grafana database role exists"
 docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" <<SQL
 DO \$\$

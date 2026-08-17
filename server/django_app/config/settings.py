@@ -31,6 +31,20 @@ DEBUG = _env_bool("DJANGO_DEBUG", default=False)
 
 ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1")
 
+# Django is never reachable except through nginx (see the trust-boundary
+# comment in telemetry/views.py for the same reasoning), which always
+# sets X-Forwarded-Proto -- so this header can be trusted. Without it,
+# request.is_secure() is always False (the django<->nginx hop is plain
+# HTTP), which breaks admin login: Django's CSRF Origin check compares
+# the browser's real "https://..." Origin against what it thinks the
+# scheme is, and rejects the request as cross-origin when they disagree.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# Now that is_secure() is correct, these can be enforced: the admin is
+# only ever actually served over HTTPS (see server/nginx), so cookies
+# should never go out over plain HTTP.
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",

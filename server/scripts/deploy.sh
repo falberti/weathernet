@@ -34,5 +34,11 @@ docker compose exec -T django python manage.py migrate --noinput
 log "Collecting static files"
 docker compose exec -T django python manage.py collectstatic --noinput
 
+# See the matching comment in scripts/setup.sh: WhiteNoise only indexes
+# STATIC_ROOT at process startup, so a running django needs restarting
+# to pick up whatever collectstatic just wrote.
+log "Restarting django so it picks up the newly-collected static files"
+docker compose restart django
+
 COMMIT="$(git -C "${REPO_ROOT}" rev-parse --short HEAD)"
 log "Deployed commit ${COMMIT}"
