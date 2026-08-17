@@ -17,7 +17,10 @@ and [`PROJECT_SPEC.md`](../PROJECT_SPEC.md) for the full design.
 - `weathernet_probe/spool.py` -- on-disk retry queue for failed sends.
 - `weathernet_probe/sensors/` -- the pluggable sensor framework:
   `base.py` (the `Sensor` interface), `registry.py` (config name →
-  driver class), `mock.py` (the only drivers implemented in v1).
+  driver class), `mock.py` (no hardware needed), `bme680.py` (real
+  temperature/humidity/pressure/gas over I2C -- see the top-level
+  README for wiring; safe to import without the `bme680` package or
+  real hardware present, only reading a sensor requires either).
 - `config/probe.example.yaml` -- documents `probe.yaml`'s schema for
   reference/manual editing later. Not part of the normal setup path --
   `scripts/enroll.py` writes the real one automatically.

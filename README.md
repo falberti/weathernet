@@ -154,7 +154,7 @@ Both refuse to run if the working tree has uncommitted changes.
 
 ## Adding a real sensor driver
 
-v1 ships mock sensors only (see "Known limitations" below). To add a
+v1 ships mostly mock sensors (see "Known limitations" below). To add a
 real one:
 
 1. Add a module under `probe/weathernet_probe/sensors/` implementing
@@ -165,6 +165,46 @@ real one:
 3. Add that name to the `sensors:` list in a probe's `probe.yaml`.
 
 Nothing in `main.py` or `transport.py` needs to change.
+
+### BME680 wiring (I2C)
+
+The included `bme680_temperature`/`bme680_humidity`/`bme680_pressure`/
+`bme680_gas` drivers (`weathernet_probe/sensors/bme680.py`) expect the
+sensor wired for I2C. Most inexpensive BME680 breakout boards expose 6
+pins:
+
+| Sensor pin | Pi pin (40-pin header) | Notes |
+|---|---|---|
+| VCC  | Pin 1 (3.3V) | **Not** 5V (pins 2/4) -- the BME680 is a 3.3V part |
+| GND  | Pin 6 or 9   | |
+| SCL  | Pin 5 (GPIO3, SCL1) | |
+| SDA  | Pin 3 (GPIO2, SDA1) | |
+| SDO  | GND | Sets the I2C address to `0x76`, which the driver assumes |
+| CS   | VCC (3.3V) | Forces I2C mode -- grounded or floating selects SPI instead |
+
+Then enable I2C and confirm the sensor answers:
+
+```bash
+sudo raspi-config nonint do_i2c 0
+sudo apt-get install -y i2c-tools
+i2cdetect -y 1   # expect to see a device at address 76
+```
+
+To actually use it, edit `/etc/weathernet-probe/probe.yaml`'s `sensors:`
+list (replace or add to the mock entries), then:
+
+```bash
+cd ~/weathernet/probe
+source venv/bin/activate && pip install -r requirements.txt && deactivate
+sudo systemctl restart weathernet-probe
+```
+
+`bme680`/`smbus2` (the driver's dependencies) are Linux/I2C-specific and
+only actually get exercised once a `bme680_*` sensor is configured --
+importing the driver module without them installed, or without the
+sensor wired up, is harmless (see the module's docstring), but reading
+one without the package installed raises a clear, per-sensor
+`SensorReadError` rather than crashing the daemon.
 
 ## Reaching a probe remotely
 
@@ -202,8 +242,10 @@ to wait for the next tick.
 
 ## Known limitations of v1
 
-- **Mock sensors only.** Real drivers (BME680, SPS30, wind vane/rain
-  gauge) are not implemented; see "Adding a real sensor driver" above.
+- **Mostly mock sensors.** A real BME680 driver (temperature, humidity,
+  pressure, gas resistance) is implemented -- see "Adding a real sensor
+  driver" above and `weathernet_probe/sensors/bme680.py`. SPS30, a wind
+  vane/anemometer, and a rain gauge are still not implemented.
 - **Raspberry Pi only.** No Arduino / non-Linux probe support yet.
 - **No certificate rotation or revocation.** Enrollment solves
   *issuance*, not the full lifecycle -- issued certs are long-lived,

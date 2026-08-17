@@ -1,7 +1,8 @@
-# Copied to probe.yaml and filled in by scripts/setup.sh. probe_id must
-# be the exact UUID used as the Common Name of this probe's client
-# certificate (see server/pki/generate-probe-cert.sh) and as the id of
-# its Probe row in Django Admin -- all three must agree.
+# Documents probe.yaml's schema for reference/manual editing. The real
+# file is written automatically by scripts/enroll.py during enrollment
+# (PROJECT_SPEC.md Section 5.7) -- probe_id, the cert paths, and the
+# WireGuard config all come from that response, not from hand-editing
+# this template.
 
 probe_id: "00000000-0000-0000-0000-000000000000"
 
@@ -21,7 +22,10 @@ ca_cert_path: /etc/weathernet-probe/certs/ca.cert.pem
 report_interval_seconds: 300
 
 # Names must match entries in weathernet_probe/sensors/registry.py.
-# Only mock sensors exist in v1 -- see PROJECT_SPEC.md Section 12.
+# Mock sensors (always available, no hardware needed):
+#   mock_temperature, mock_humidity, mock_pressure
+# Real BME680 over I2C (see the top-level README for wiring):
+#   bme680_temperature, bme680_humidity, bme680_pressure, bme680_gas
 sensors:
   - mock_temperature
   - mock_humidity
