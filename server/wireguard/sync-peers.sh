@@ -34,7 +34,8 @@ print(f'{next(net.hosts())}/{net.prefixlen}')
 
 HEADER_TMP="$(mktemp)"
 PEERS_TMP="$(mktemp)"
-trap 'rm -f "${HEADER_TMP}" "${PEERS_TMP}"' EXIT
+STRIPPED_TMP="$(mktemp)"
+trap 'rm -f "${HEADER_TMP}" "${PEERS_TMP}" "${STRIPPED_TMP}"' EXIT
 
 log "Rendering the [Interface] block"
 sed -e "s|\${WIREGUARD_SERVER_PRIVATE_KEY}|$(cat "${PRIVATE_KEY_FILE}")|" \
@@ -51,7 +52,13 @@ sudo chmod 600 "${WG_CONF}"
 
 if systemctl is-active --quiet wg-quick@wg0; then
   log "wg0 is already up -- applying the new peer list without dropping existing tunnels"
-  sudo wg syncconf wg0 <(sudo wg-quick strip "${WG_CONF}")
+  # Not `sudo wg syncconf wg0 <(sudo wg-quick strip ...)`: piping a
+  # process-substitution /dev/fd/N path through a second sudo routinely
+  # fails with "fopen: No such file or directory", since sudo commonly
+  # closes inherited file descriptors above stderr before exec'ing the
+  # target command. A real temp file sidesteps that entirely.
+  sudo wg-quick strip "${WG_CONF}" > "${STRIPPED_TMP}"
+  sudo wg syncconf wg0 "${STRIPPED_TMP}"
 else
   log "Bringing up wg0 for the first time"
   sudo systemctl enable --now wg-quick@wg0
