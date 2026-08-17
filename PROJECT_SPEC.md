@@ -1126,8 +1126,19 @@ design — see Section 5.7.
    fingerprint mismatch, etc.) rather than swallowing it.
 4. Install the systemd unit (`weathernet-probe.service`) from the template,
    substituting the actual install path and venv path.
-5. `systemctl enable --now weathernet-probe` and
-   `systemctl enable --now wg-quick@wg0`.
+5. `systemctl enable weathernet-probe wg-quick@wg0`, then
+   `systemctl restart weathernet-probe wg-quick@wg0` -- **not**
+   `enable --now`. This script is meant to be safely re-runnable to
+   re-enroll an already-set-up probe (see the top-level README), and on
+   a re-run both services are typically already active; `enable --now`
+   is a no-op on an already-running unit. That leaves the *old* process
+   running with the *old* `probe.yaml`/certs/WireGuard keys held in
+   memory, silently ignoring whatever `enroll.py` just wrote to disk --
+   a real failure mode hit in practice: the probe kept presenting its
+   previous WireGuard public key indefinitely after a re-enrollment,
+   because `wg-quick@wg0` was already up and never got told to reload.
+   `restart` always applies the current on-disk config, whether this is
+   the first run (restarting an inactive unit is just a start) or not.
 6. Print how to tail logs (`journalctl -u weathernet-probe -f`) and how to
    check spool status.
 

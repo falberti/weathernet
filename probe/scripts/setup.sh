@@ -112,10 +112,18 @@ sed -e "s|__INSTALL_DIR__|${PROBE_DIR}|g" \
     "${PROBE_DIR}/config/weathernet-probe.service" | sudo tee "${SERVICE_PATH}" >/dev/null
 sudo systemctl daemon-reload
 
-# --- 4. Enable + start both services ---
-log "Enabling and starting weathernet-probe and the WireGuard tunnel"
-sudo systemctl enable --now weathernet-probe
-sudo systemctl enable --now wg-quick@wg0
+# --- 4. Enable + (re)start both services ---
+# Not `enable --now`: on a re-run of this script (re-enrolling an
+# already-set-up probe), both services are typically already active,
+# and `enable --now` is a no-op on an already-running unit -- it would
+# leave the OLD process running with the OLD probe.yaml/certs/WireGuard
+# keys in memory, silently ignoring everything enroll.py just wrote to
+# disk. `restart` always picks up the current on-disk config, whether
+# this is the first run (restarting an inactive unit is just a start)
+# or a re-run.
+log "Enabling and (re)starting weathernet-probe and the WireGuard tunnel"
+sudo systemctl enable weathernet-probe wg-quick@wg0
+sudo systemctl restart weathernet-probe wg-quick@wg0
 
 # --- 5. Summary ---
 cat <<SUMMARY
