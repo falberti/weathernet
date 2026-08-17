@@ -5,7 +5,7 @@
   "tags": ["weathernet"],
   "timezone": "utc",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "1m",
   "time": { "from": "now-24h", "to": "now" },
   "panels": [
@@ -46,14 +46,75 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Sensor Readings (placeholder -- populates once a real sensor driver reports data)",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "title": "Temperature",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
       "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "celsius" },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name || ' / ' || r.sensor_type AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE $__timeFilter(r.time) ORDER BY 1;",
+          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'temperature_c' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Humidity",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'humidity_pct' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Pressure",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "pressurehpa" },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'pressure_hpa' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Gas Resistance (uncalibrated -- higher is generally cleaner air)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "ohm" },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'gas_resistance_ohm' AND $__timeFilter(r.time) ORDER BY 1;",
           "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
         }
       ]
