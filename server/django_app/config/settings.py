@@ -132,6 +132,25 @@ REST_FRAMEWORK = {
     # the trust-boundary comment in telemetry/views.py.
 }
 
+# Django's own default logging only sends request-handling exceptions
+# (i.e. anything that becomes a 500) to the console when DEBUG=True --
+# with DEBUG=False (correct for this deployment) they'd otherwise only
+# go to mail_admins, which does nothing without ADMINS configured. That
+# makes `docker compose logs django` useless for exactly the errors an
+# operator most needs to see. Force a console handler regardless of
+# DEBUG so tracebacks always end up in the container's logs.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}
+
 # Used by the telemetry app's migrations to configure TimescaleDB
 # compression/retention policies (PROJECT_SPEC.md Section 5.3).
 TELEMETRY_RETENTION_DAYS = int(os.environ.get("TELEMETRY_RETENTION_DAYS", "90"))

@@ -24,6 +24,11 @@ fi
 umask 077
 wg genkey | tee "${PRIVATE_KEY}" | wg pubkey > "${PUBLIC_KEY}"
 chmod 600 "${PRIVATE_KEY}"
+# The public key isn't sensitive -- it's handed to every probe during
+# enrollment and read by the django container (a different host UID
+# than whoever runs this script). umask 077 above would otherwise leave
+# it at 600, unreadable to anyone else.
+chmod 644 "${PUBLIC_KEY}"
 
 echo "Generated server WireGuard keypair:"
 echo "  private: ${PRIVATE_KEY} (never leaves this host)"

@@ -75,6 +75,33 @@ class EnrollView(APIView):
             except SubnetExhaustedError as exc:
                 return Response({"detail": str(exc)}, status=409)
 
+            # Everything the response body needs is gathered here too,
+            # still before any write -- these are just file reads and
+            # shouldn't normally fail, but if the CA cert or the
+            # WireGuard public key file is ever unreadable (e.g. a
+            # permissions slip -- see server/wireguard/generate-server-keys.sh),
+            # this way that surfaces as a clean 500 with the token and
+            # database left untouched, not as a burned token and an
+            # orphaned Probe row with no certificate ever delivered.
+            response_body = {
+                "probe_id": str(new_probe_id),
+                "client_cert_pem": client_cert_pem,
+                "ca_cert_pem": ca.ca_cert_pem(),
+                "server_url": f"https://{settings.SERVER_PUBLIC_IP}",
+                "wireguard": {
+                    "tunnel_ip": tunnel_ip,
+                    "server_public_key": read_server_public_key(),
+                    "server_endpoint": f"{settings.SERVER_PUBLIC_IP}:{settings.WIREGUARD_LISTEN_PORT}",
+                    # The server's *tunnel* address (e.g. 10.10.0.1) --
+                    # what this probe's own [Peer] block's AllowedIPs
+                    # must be. Not the same thing as server_endpoint
+                    # above (that's the server's public IP:port, used
+                    # for Endpoint=).
+                    "server_tunnel_ip": server_tunnel_ip(),
+                },
+                "report_interval_seconds": DEFAULT_REPORT_INTERVAL_SECONDS,
+            }
+
             probe = Probe.objects.create(
                 id=new_probe_id,
                 name=token.probe_name,
@@ -87,21 +114,4 @@ class EnrollView(APIView):
             token.resulting_probe = probe
             token.save(update_fields=["used_at", "resulting_probe"])
 
-        response_body = {
-            "probe_id": str(probe.id),
-            "client_cert_pem": client_cert_pem,
-            "ca_cert_pem": ca.ca_cert_pem(),
-            "server_url": f"https://{settings.SERVER_PUBLIC_IP}",
-            "wireguard": {
-                "tunnel_ip": tunnel_ip,
-                "server_public_key": read_server_public_key(),
-                "server_endpoint": f"{settings.SERVER_PUBLIC_IP}:{settings.WIREGUARD_LISTEN_PORT}",
-                # The server's *tunnel* address (e.g. 10.10.0.1) -- what
-                # this probe's own [Peer] block's AllowedIPs must be.
-                # Not the same thing as server_endpoint above (that's
-                # the server's public IP:port, used for Endpoint=).
-                "server_tunnel_ip": server_tunnel_ip(),
-            },
-            "report_interval_seconds": DEFAULT_REPORT_INTERVAL_SECONDS,
-        }
         return Response(response_body, status=201)
