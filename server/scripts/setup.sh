@@ -122,6 +122,16 @@ log "Building and starting the stack"
 docker compose build
 docker compose up -d
 
+# nginx.conf is bind-mounted, not baked into an image -- `docker compose
+# up -d` only recreates a container when the *service definition* in
+# docker-compose.yml changed, it has no visibility into a bind-mounted
+# file's contents. Without this, an already-running nginx silently keeps
+# serving whatever config it read at its last start, even though the
+# file on disk was just re-rendered above -- a re-run of this script
+# would look successful while nginx quietly ignored the update.
+log "Restarting nginx so it picks up the freshly rendered config"
+docker compose restart nginx
+
 # --- 8. Migrations ---
 log "Waiting for postgres to be healthy"
 for _ in $(seq 1 30); do
