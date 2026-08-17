@@ -32,17 +32,21 @@ http {
         # that presents a certificate failing verification. It only
         # tolerates a client presenting *no* certificate at all.
         # optional_no_ca defers that decision to us, via $ssl_client_verify
-        # below, which is what lets /api/v1/ require a valid cert while
-        # /admin/ (below) stays reachable without one on the same port.
+        # below, which is what lets /api/v1/ingest require a valid cert
+        # while /api/v1/enroll and /admin/ (below) stay reachable
+        # without one on the same port.
         ssl_client_certificate /etc/weathernet/pki/ca.cert.pem;
         ssl_verify_client optional_no_ca;
         ssl_verify_depth 1;
 
         client_max_body_size 64k;
 
-        # The only path probes ever call. Everything else is rejected
-        # below without being proxied anywhere.
-        location /api/v1/ {
+        # Every reporting-cycle call a probe makes, once enrolled --
+        # requires a valid client cert. Deliberately an exact match, not
+        # a prefix: /api/v1/enroll (a brand-new probe has no cert yet)
+        # must NOT be caught by this block, it needs the unauthenticated
+        # location below instead.
+        location = /api/v1/ingest {
             # Note: nginx's own "495"/"496" status codes are internal
             # pseudo-codes tied to its own SSL-required enforcement --
             # returning them explicitly here does not work as it looks
@@ -67,11 +71,14 @@ http {
             proxy_set_header X-Forwarded-Proto $scheme;
         }
 
-        # Everything else (Django Admin, its static assets, and any
-        # unmapped path) is proxied straight through without an mTLS
-        # requirement -- Django's own authentication is the trust
-        # boundary for /admin/, and Django's URLconf itself 404s on
-        # anything it doesn't recognize.
+        # Everything else -- Django Admin and its static assets,
+        # /api/v1/enroll (a brand-new probe has no client cert to
+        # present yet; trust for that endpoint comes entirely from its
+        # single-use token, checked by Django itself), and any unmapped
+        # path -- is proxied straight through without an mTLS
+        # requirement. Django's own authentication is the trust
+        # boundary for /admin/, and Django's URLconf 404s on anything
+        # it doesn't recognize.
         location / {
             proxy_pass http://django:8000;
             proxy_set_header Host $host;

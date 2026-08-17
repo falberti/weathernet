@@ -50,7 +50,15 @@ probe sitting behind a home NAT). It's an independent channel from the
 mTLS telemetry path above -- unrelated to probe authentication for
 ingestion, and not gated by a probe's `is_active` flag. See
 [Section 3](PROJECT_SPEC.md#3-architecture) and
-[Section 5.7](PROJECT_SPEC.md#57-remote-access-via-wireguard) of the spec.
+[Section 5.8](PROJECT_SPEC.md#58-remote-access-via-wireguard-ongoing-operation)
+of the spec.
+
+A third path exists for exactly one moment per probe: **enrollment**. A
+brand-new probe has no mTLS certificate yet, so it can't use mTLS to
+bootstrap itself -- a single-use, short-lived token (generated in
+Django Admin) stands in for that first credential exchange instead.
+See [Section 5.7](PROJECT_SPEC.md#57-zero-touch-probe-enrollment) of
+the spec for the full design.
 
 ## Prerequisites
 
@@ -82,54 +90,48 @@ OS, Python 3, and network reachability to the server on `443`.
    to create a Django Admin superuser, and generates the server's
    WireGuard keypair and brings up its `wg0` interface.
 4. When it finishes, the script prints the Grafana and Django Admin
-   URLs and the server's WireGuard public key -- you'll need that key
-   for every probe's setup.
+   URLs and installs a systemd timer that keeps WireGuard peers in sync
+   automatically -- no manual step needed there going forward.
 
 ## Probe setup
 
-1. On the server, generate a client certificate for the new probe --
-   pick a UUID (or let the probe's own `setup.sh` generate one for you
-   and use it here):
+This is genuinely one command on the probe side -- zero-touch
+enrollment (see above) means there's no manual certificate, UUID, or
+WireGuard key exchange to do by hand.
+
+1. In Django Admin, add an **Enrollment token**: fill in the probe's
+   name and hardware type, save. The resulting page prints a one-time
+   token and the *exact* command to run on the probe, including the
+   server's IP and its certificate fingerprint (for TLS pinning) --
+   nothing to copy from anywhere else.
+2. On the probe device, clone this repo and `cd probe/`.
+3. Run the command Django printed:
    ```bash
-   ./server/pki/generate-probe-cert.sh <probe-uuid>
+   ./scripts/setup.sh --server <server-public-ip> --token <token> --fingerprint <sha256-fingerprint>
    ```
-   This prints the exact `scp` command to copy the resulting
-   `client.cert.pem`, `client.key.pem`, and `ca.cert.pem` to the probe.
-2. In Django Admin, add a `Probe` with `id` set to that same UUID.
-3. On the probe device, clone this repo and `cd probe/`.
-4. Copy the three files from step 1 into
-   `/etc/weathernet-probe/certs/` on the probe (the printed `scp`
-   command does this).
-5. Run setup:
-   ```bash
-   ./scripts/setup.sh
-   ```
-   It creates a virtualenv, prompts for the probe UUID (must match step
-   2), hardware type, and the server's public IP, writes
-   `/etc/weathernet-probe/probe.yaml`, verifies the certificate files
-   are in place, and installs + starts the `weathernet-probe` systemd
-   service.
-6. The same script then sets up the WireGuard tunnel: it generates the
-   probe's own WireGuard keypair and prints its public key, then prompts
-   you for the **server's** WireGuard public key (from step 4 of "Server
-   setup") and a tunnel IP to assign this probe (e.g. `10.10.0.5` -- the
-   next free address; the script doesn't check for collisions itself).
-7. Back on the server, open the `Probe` you created in step 2, in Django
-   Admin, and fill in `wireguard_public_key` (printed in step 6) and
-   `wireguard_tunnel_ip` (the address you picked in step 6). Then run:
-   ```bash
-   ./server/wireguard/sync-peers.sh
-   ```
-   so the server picks up this probe as a peer without dropping any
-   existing tunnels.
+   This creates a virtualenv, generates the probe's mTLS and WireGuard
+   keypairs locally (private keys never leave the device), verifies the
+   server's certificate against the given fingerprint before sending
+   anything, exchanges the token for a signed certificate and an
+   assigned WireGuard tunnel IP, writes `probe.yaml` and `wg0.conf`, and
+   installs + starts both the `weathernet-probe` and `wg-quick@wg0`
+   systemd services.
+4. That's it. The probe should appear in Grafana within its report
+   interval, and become SSH-reachable at its WireGuard tunnel IP from
+   the server within about a minute (the timer installed during server
+   setup picks it up automatically).
+
+`--fingerprint` is optional but recommended -- without it, the probe
+still enrolls, but has no way to confirm it's actually talking to your
+server for that one bootstrap request (it prints a clear warning when
+you skip it, rather than silently reducing the guarantee).
 
 ## Adding a second probe
 
-Repeat the "Probe setup" steps above with a new UUID, name, and the
-next free WireGuard tunnel IP -- that's the entire multi-probe story
-for v1. Nothing on the server side needs to change beyond running
-`sync-peers.sh` again; the registry and ingestion endpoint already
-support any number of probes.
+Repeat the "Probe setup" steps above -- generate another token, run
+`setup.sh` again with it. That's the entire multi-probe story for v1;
+nothing on the server side needs to change, and there's no per-probe
+bookkeeping (UUIDs, tunnel IPs, cert files) left to track by hand.
 
 ## Deploying updates
 
@@ -171,21 +173,30 @@ The server is the only bastion into the WireGuard subnet for v1 -- your
 own laptop isn't a peer. This works even for a probe you've deactivated
 in Django Admin (`is_active` only gates telemetry ingestion, not
 WireGuard reachability) and even if its mTLS certificate has been
-revoked. After registering or editing any probe's WireGuard fields in
-Django Admin, run `./server/wireguard/sync-peers.sh` on the server so
-the change takes effect.
+revoked. A systemd timer installed during server setup re-runs
+`wireguard/sync-peers.sh` every minute, so a newly enrolled probe (or
+one whose WireGuard fields you edited by hand in Django Admin) becomes
+reachable on its own -- run that script manually only if you don't want
+to wait for the next tick.
 
 ## Known limitations of v1
 
 - **Mock sensors only.** Real drivers (BME680, SPS30, wind vane/rain
   gauge) are not implemented; see "Adding a real sensor driver" above.
 - **Raspberry Pi only.** No Arduino / non-Linux probe support yet.
-- **Manual certificate issuance.** No enrollment protocol or rotation
-  automation -- certs are generated and copied by hand via the `pki/`
-  scripts.
-- **No automatic WireGuard peer sync.** `wireguard/sync-peers.sh` is a
-  manual step after registering or editing a probe's WireGuard fields
-  in Django Admin -- there's no save hook that runs it for you.
+- **No certificate rotation or revocation.** Enrollment solves
+  *issuance*, not the full lifecycle -- issued certs are long-lived,
+  there's no renewal flow, and no CRL/OCSP. Deleting a `Probe` row stops
+  ingestion (Django 404s it) but doesn't cryptographically invalidate
+  the certificate -- nginx would still complete a TLS handshake with it.
+- **No rate limiting on `/api/v1/enroll`.** The token itself (32 bytes
+  of entropy) is the only defense against guessing; there's no request
+  throttling on top of it.
+- **The CA private key is readable by the `django` container.**
+  Zero-touch enrollment needs it to sign CSRs synchronously -- a
+  deliberate trade-off (see `PROJECT_SPEC.md` Section 5.7), not an
+  oversight. A more isolated design would move signing into a separate,
+  minimal process.
 - **No WireGuard access for the operator's own device.** The server is
   the only bastion into the WireGuard subnet; reaching a probe means
   SSHing into the server first, then hopping to the probe's tunnel IP.
@@ -211,6 +222,14 @@ the change takes effect.
   either inactive or the certificate CN doesn't match the payload's
   `probe_id` (same status code as the nginx-layer rejection above, but
   a different log to check).
+- **Failed enrollment**: `docker compose logs django` on the server, for
+  a request to `/api/v1/enroll`. `404` means the token doesn't match
+  any `EnrollmentToken` (typo, or copied from the wrong Admin page);
+  `410` means it's expired or was already used -- generate a new one.
+  `400` usually means a CSR problem; `409` means `WIREGUARD_SUBNET` is
+  exhausted. On the probe side, `enroll.py` prints the server's error
+  detail directly, so the probe's own terminal output is often the
+  fastest place to look first.
 - **WireGuard tunnel not connecting**: run `sudo wg show wg0` on both
   the server and the probe. `latest handshake: (none)` on the probe
   usually means the WireGuard UDP port isn't actually open on the

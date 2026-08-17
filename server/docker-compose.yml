@@ -32,6 +32,27 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       TELEMETRY_RETENTION_DAYS: ${TELEMETRY_RETENTION_DAYS}
       TELEMETRY_COMPRESS_AFTER_DAYS: ${TELEMETRY_COMPRESS_AFTER_DAYS}
+      # Zero-touch enrollment (PROJECT_SPEC.md Section 5.7): needed to
+      # sign CSRs, allocate WireGuard tunnel IPs, and build the enroll
+      # response / the admin's printed setup command.
+      ENROLLMENT_TOKEN_TTL_MINUTES: ${ENROLLMENT_TOKEN_TTL_MINUTES}
+      SERVER_PUBLIC_IP: ${SERVER_PUBLIC_IP}
+      WIREGUARD_SUBNET: ${WIREGUARD_SUBNET}
+      WIREGUARD_LISTEN_PORT: ${WIREGUARD_LISTEN_PORT}
+    volumes:
+      # Read-only. The CA key is the one meaningful new attack-surface
+      # trade-off enrollment introduces -- signing CSRs synchronously
+      # inside this view is what needs it. See PROJECT_SPEC.md Section
+      # 5.5/5.7 for the reasoning, and scripts/setup.sh for how its host
+      # file permissions are kept from being world-readable.
+      - ./pki/ca/ca.key.pem:/etc/weathernet/pki/ca.key.pem:ro
+      - ./pki/ca/ca.cert.pem:/etc/weathernet/pki/ca.cert.pem:ro
+      # Public only -- read to compute the fingerprint admin.py prints
+      # for the probe's optional TLS pinning.
+      - ./pki/server/server.cert.pem:/etc/weathernet/pki/server.cert.pem:ro
+      # Public only -- handed back to a probe during enrollment so it
+      # can render its own wg0.conf.
+      - ./wireguard/server_public.key:/etc/weathernet/wireguard/server_public.key:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -136,3 +136,30 @@ REST_FRAMEWORK = {
 # compression/retention policies (PROJECT_SPEC.md Section 5.3).
 TELEMETRY_RETENTION_DAYS = int(os.environ.get("TELEMETRY_RETENTION_DAYS", "90"))
 TELEMETRY_COMPRESS_AFTER_DAYS = int(os.environ.get("TELEMETRY_COMPRESS_AFTER_DAYS", "7"))
+
+# --- Zero-touch probe enrollment (PROJECT_SPEC.md Section 5.7) ---
+ENROLLMENT_TOKEN_TTL_MINUTES = int(os.environ.get("ENROLLMENT_TOKEN_TTL_MINUTES", "30"))
+
+# The server's own public IP and WireGuard listen port -- needed to
+# build the enroll response's server_url/server_endpoint (probes/views.py)
+# and the ready-to-paste command admin.py prints when a token is created.
+SERVER_PUBLIC_IP = os.environ.get("SERVER_PUBLIC_IP", "")
+WIREGUARD_SUBNET = os.environ.get("WIREGUARD_SUBNET", "10.10.0.0/24")
+WIREGUARD_LISTEN_PORT = int(os.environ.get("WIREGUARD_LISTEN_PORT", "51820"))
+
+# The CA's key and cert, and the server's WireGuard public key, are
+# bind-mounted read-only into this container (see docker-compose.yml)
+# so probes/ca.py can sign CSRs and probes/wireguard.py can hand back
+# the server's WireGuard identity during enrollment. This is the one
+# meaningful new attack-surface trade-off zero-touch enrollment
+# introduces -- see PROJECT_SPEC.md Section 5.5/5.7 for the reasoning.
+WEATHERNET_PKI_DIR = os.environ.get("WEATHERNET_PKI_DIR", "/etc/weathernet/pki")
+CA_KEY_PATH = os.path.join(WEATHERNET_PKI_DIR, "ca.key.pem")
+CA_CERT_PATH = os.path.join(WEATHERNET_PKI_DIR, "ca.cert.pem")
+# Only the cert (public), not the server's private key -- read to compute
+# the SHA-256 fingerprint admin.py prints for TLS pinning, so the
+# operator never has to compute or copy it by hand.
+SERVER_CERT_PATH = os.path.join(WEATHERNET_PKI_DIR, "server.cert.pem")
+WIREGUARD_SERVER_PUBLIC_KEY_PATH = os.environ.get(
+    "WIREGUARD_SERVER_PUBLIC_KEY_PATH", "/etc/weathernet/wireguard/server_public.key"
+)

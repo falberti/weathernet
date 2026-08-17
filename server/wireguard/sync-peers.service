@@ -1,0 +1,9 @@
+[Unit]
+Description=WeatherNet WireGuard peer sync
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__SERVER_DIR__
+ExecStart=__SERVER_DIR__/wireguard/sync-peers.sh

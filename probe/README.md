@@ -18,15 +18,25 @@ and [`PROJECT_SPEC.md`](../PROJECT_SPEC.md) for the full design.
 - `weathernet_probe/sensors/` -- the pluggable sensor framework:
   `base.py` (the `Sensor` interface), `registry.py` (config name →
   driver class), `mock.py` (the only drivers implemented in v1).
-- `config/probe.example.yaml` -- template copied to
-  `/etc/weathernet-probe/probe.yaml` by `scripts/setup.sh`.
+- `config/probe.example.yaml` -- documents `probe.yaml`'s schema for
+  reference/manual editing later. Not part of the normal setup path --
+  `scripts/enroll.py` writes the real one automatically.
 - `config/weathernet-probe.service` -- systemd unit template.
-- `config/wg0.conf.template` -- WireGuard interface config template,
-  rendered by `scripts/setup.sh` into `/etc/wireguard/wg0.conf`. This is
-  a separate, independent channel from the mTLS telemetry path above,
-  used only for operator troubleshooting (SSH via the server) -- see
-  [`PROJECT_SPEC.md`](../PROJECT_SPEC.md) Section 6.7. No Python code is
-  involved; it's plain `wireguard-tools` + a config file.
+- `scripts/setup.sh` -- the one command an operator runs, per
+  [`PROJECT_SPEC.md`](../PROJECT_SPEC.md) Section 5.7/8.2: installs
+  dependencies (including `wireguard-tools`), calls `enroll.py`,
+  installs and starts both systemd services.
+- `scripts/enroll.py` -- does the actual enrollment: detects hardware
+  type, generates the mTLS keypair + CSR and the WireGuard keypair
+  locally via `openssl`/`wg` (private keys never leave this device),
+  optionally pins the server's TLS certificate by SHA-256 fingerprint,
+  calls `POST /api/v1/enroll`, and writes `probe.yaml` and
+  `/etc/wireguard/wg0.conf` from the response. No new code under
+  `weathernet_probe/` -- this is a standalone script, not part of the
+  daemon package, and doesn't add a `cryptography` dependency to the
+  probe's runtime requirements (it shells out to `openssl`/`wg`
+  instead, consistent with keeping this side of things light -- see
+  Design constraints in the spec).
 
 ## Running the tests
 
@@ -55,10 +65,15 @@ whole point of the registry indirection.
 ## Operating a running probe
 
 ```bash
-journalctl -u weathernet-probe -f          # tail logs
-systemctl status weathernet-probe          # current state
+journalctl -u weathernet-probe -f            # tail logs
+systemctl status weathernet-probe            # current state
 wc -l /var/lib/weathernet-probe/spool.jsonl  # backlog size (if any)
+sudo wg show wg0                             # WireGuard tunnel status
 ```
 
 A growing spool file means the probe can't currently reach the server;
-it retries the whole backlog, oldest first, every reporting cycle.
+it retries the whole backlog, oldest first, every reporting cycle. The
+WireGuard tunnel (`wg-quick@wg0.service`) is a separate, independent
+systemd service from `weathernet-probe` -- used only for operator SSH
+access via the server, unrelated to telemetry reporting (see
+[`PROJECT_SPEC.md`](../PROJECT_SPEC.md) Section 5.8).

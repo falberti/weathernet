@@ -63,7 +63,7 @@ set -a
 source .env
 set +a
 
-# --- 4. PKI ---
+# --- 4. mTLS PKI ---
 if [[ ! -f pki/ca/ca.cert.pem ]]; then
   log "Generating internal CA"
   ./pki/generate-ca.sh
@@ -78,17 +78,45 @@ else
   log "Server certificate already exists"
 fi
 
-# --- 5. Render nginx.conf ---
+# The django container signs CSRs during enrollment (PROJECT_SPEC.md
+# Section 5.7), so it needs to read the CA private key -- via a
+# read-only bind mount at a fixed container UID (see django_app/
+# Dockerfile's `useradd --uid 1000 django`), not by making the file
+# world-readable on the host.
+log "Granting the django container's user read access to the CA key"
+sudo chown 1000:1000 pki/ca/ca.key.pem
+
+# --- 5. WireGuard keys ---
+# Generated here, before the stack starts, because django's compose
+# service bind-mounts the server's WireGuard public key read-only --
+# that mount source must already exist or Docker creates an empty
+# directory in its place instead of failing loudly.
+if ! command -v wg >/dev/null 2>&1; then
+  log "Installing wireguard-tools"
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y wireguard-tools
+  else
+    echo "wireguard-tools ('wg') is not installed and apt-get is unavailable." >&2
+    echo "Install it manually, then re-run this script." >&2
+    exit 1
+  fi
+fi
+
+log "Generating the server's WireGuard keypair (if it doesn't already exist)"
+./wireguard/generate-server-keys.sh
+SERVER_WG_PUBLIC_KEY="$(cat wireguard/server_public.key)"
+
+# --- 6. Render nginx.conf ---
 log "Rendering nginx.conf for ${PUBLIC_IP}"
 sed "s|\${SERVER_PUBLIC_IP}|${PUBLIC_IP}|g" \
   nginx/nginx.conf.template > nginx/nginx.conf
 
-# --- 6. Build and start ---
+# --- 7. Build and start ---
 log "Building and starting the stack"
 docker compose build
 docker compose up -d
 
-# --- 7. Migrations ---
+# --- 8. Migrations ---
 log "Waiting for postgres to be healthy"
 for _ in $(seq 1 30); do
   status="$(docker compose ps --format '{{.Health}}' postgres 2>/dev/null || true)"
@@ -127,7 +155,7 @@ SQL
 
 docker compose restart grafana >/dev/null
 
-# --- 8. Superuser ---
+# --- 9. Superuser ---
 if [[ -n "${DJANGO_SUPERUSER_USERNAME:-}" && -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]]; then
   log "Creating Django superuser ${DJANGO_SUPERUSER_USERNAME} (non-interactive)"
   docker compose exec -T \
@@ -142,7 +170,7 @@ else
   fi
 fi
 
-# --- 9. Sanity check ---
+# --- 10. Sanity check ---
 log "Confirming hypertables exist"
 HYPERTABLES="$(docker compose exec -T postgres psql -tA -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" \
   -c "SELECT hypertable_name FROM timescaledb_information.hypertables ORDER BY 1;")"
@@ -152,29 +180,20 @@ else
   echo "WARNING: expected hypertables not found (got: ${HYPERTABLES}). Check migration logs." >&2
 fi
 
-# --- 10. WireGuard remote access ---
+# --- 11. Bring up WireGuard and keep it in sync ---
 # A second, independent access path for operator troubleshooting --
 # unrelated to the mTLS telemetry path above. See PROJECT_SPEC.md
-# Section 5.7.
-if ! command -v wg >/dev/null 2>&1; then
-  log "Installing wireguard-tools"
-  if command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update && sudo apt-get install -y wireguard-tools
-  else
-    echo "wireguard-tools ('wg') is not installed and apt-get is unavailable." >&2
-    echo "Install it manually, then re-run this script." >&2
-    exit 1
-  fi
-fi
-
-log "Generating the server's WireGuard keypair (if it doesn't already exist)"
-./wireguard/generate-server-keys.sh
-SERVER_WG_PUBLIC_KEY="$(cat wireguard/server_public.key)"
-
+# Section 5.8.
 log "Bringing up the WireGuard interface"
 ./wireguard/sync-peers.sh
 
-# --- 11. Summary ---
+log "Installing the WireGuard peer-sync timer (runs every minute)"
+sed "s|__SERVER_DIR__|${SERVER_DIR}|g" wireguard/sync-peers.service | sudo tee /etc/systemd/system/weathernet-sync-peers.service >/dev/null
+sed "s|__SERVER_DIR__|${SERVER_DIR}|g" wireguard/sync-peers.timer | sudo tee /etc/systemd/system/weathernet-sync-peers.timer >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now weathernet-sync-peers.timer
+
+# --- 12. Summary ---
 cat <<SUMMARY
 
 WeatherNet server is up.
@@ -193,17 +212,19 @@ firewall/security group for WireGuard, in addition to 443 (nginx) and
 3000 (Grafana). Nothing fails locally if you forget this -- probes will
 just silently be unable to open a tunnel.
 
-Server WireGuard public key (every probe needs this during its own
-setup):
+Server WireGuard public key (Django already hands this to a probe
+automatically during enrollment -- shown here just for reference):
   ${SERVER_WG_PUBLIC_KEY}
 
-Next step: register your first probe.
-  1. Generate its client certificate:
-       ./pki/generate-probe-cert.sh <probe-uuid>
-  2. Register a Probe with that same UUID in Django Admin.
-  3. Copy the printed cert/key/CA files to the probe and run its setup.sh
-     -- it will also walk through WireGuard setup and print the probe's
-     public key to paste back into that Probe's Django Admin record.
-  4. After saving a probe's WireGuard fields in Django Admin, run
-     ./wireguard/sync-peers.sh here to pick it up as a peer.
+Next step: add a probe. It's one command on the probe's side:
+  1. In Django Admin, add an "Enrollment token" (probe name + hardware
+     type). Saving it prints a one-time token and the exact command to
+     run on the probe.
+  2. On the probe, git clone this repo and run that printed command:
+       ./probe/scripts/setup.sh --server ${PUBLIC_IP} --token <token> --fingerprint <...>
+     It generates its own keys, requests a signed certificate and a
+     WireGuard tunnel IP, writes its config, and starts both services
+     -- no certificates or keys to copy by hand.
+  3. The probe becomes a WireGuard peer automatically within about a
+     minute (the timer just installed above); no manual step needed.
 SUMMARY

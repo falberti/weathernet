@@ -1,6 +1,9 @@
 import uuid
+from datetime import timedelta
 
+from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class Probe(models.Model):
@@ -20,9 +23,10 @@ class Probe(models.Model):
         GENERIC_LINUX = "generic_linux", "Generic Linux"
 
     # This UUID is also the Common Name baked into the probe's mTLS
-    # client certificate (see server/pki/generate-probe-cert.sh) -- cert
-    # issuance and probe registration must agree on it.
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=True)
+    # client certificate. It's generated here, by Django, the moment an
+    # EnrollmentToken is redeemed (see views.EnrollView) -- never chosen
+    # by the operator or the probe, hence editable=False.
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
     hardware_type = models.CharField(max_length=32, choices=HardwareType.choices)
     location = models.CharField(max_length=200, blank=True)
@@ -52,3 +56,46 @@ class Probe(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.id})"
+
+
+def _default_token_expiry():
+    return timezone.now() + timedelta(minutes=settings.ENROLLMENT_TOKEN_TTL_MINUTES)
+
+
+class EnrollmentToken(models.Model):
+    """A short-lived, single-use credential that lets a brand-new probe
+    bootstrap itself with no pre-existing mTLS certificate (a probe
+    obviously can't use mTLS to fetch its own first certificate -- see
+    PROJECT_SPEC.md Section 5.7). Redeeming one (views.EnrollView)
+    creates the Probe row and issues its client certificate atomically.
+    """
+
+    # SHA-256 hex digest of the raw token -- never store the raw value
+    # itself, same principle as password storage. The raw token is shown
+    # to the operator exactly once, in admin.py's save_model(), and is
+    # unrecoverable after that.
+    token_hash = models.CharField(max_length=64, unique=True, editable=False)
+
+    # What the resulting Probe should be called / registered as -- set
+    # by the operator at token-creation time, copied onto the Probe row
+    # when the token is redeemed.
+    probe_name = models.CharField(max_length=200)
+    hardware_type = models.CharField(max_length=32, choices=Probe.HardwareType.choices)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(default=_default_token_expiry)
+    # Null means still redeemable. Set atomically, inside the same
+    # select_for_update() transaction that checks it, so a token can't
+    # be redeemed twice even under a race (see views.EnrollView).
+    used_at = models.DateTimeField(null=True, blank=True)
+    resulting_probe = models.ForeignKey(
+        Probe, null=True, blank=True, on_delete=models.SET_NULL, related_name="enrollment_token"
+    )
+
+    @property
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    def __str__(self):
+        status = "used" if self.used_at else ("expired" if self.is_expired else "unused")
+        return f"{self.probe_name} ({status})"
