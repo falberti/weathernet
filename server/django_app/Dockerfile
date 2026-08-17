@@ -14,7 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN useradd --create-home --uid 1000 django
+# Own /app so this user can create staticfiles/ (collectstatic) and
+# write .pyc files at runtime -- COPY above runs as root, so without
+# this the app would be read-only to a non-root user.
+RUN useradd --create-home --uid 1000 django \
+    && chown -R django:django /app
 USER django
 
 EXPOSE 8000
