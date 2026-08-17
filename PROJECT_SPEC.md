@@ -211,13 +211,25 @@ weathernet/
   operator to view dashboards directly by IP. Pre-provisioned with a
   PostgreSQL datasource pointed at the same `postgres` service, and one
   example dashboard on first boot (see 5.4).
-- `nginx` — the only service handling the mTLS ingestion path. Published on
-  `443`. Terminates TLS with the server's certificate, **requires and
-  verifies** the client certificate against the internal CA, and — only on
-  successful verification — proxies the request to `django`, forwarding the
-  verified certificate's CN in a header (e.g. `X-Client-Cert-CN`). Reject
-  with `495`/`496` on missing or invalid client cert (nginx does this
-  natively; no custom code needed there).
+- `nginx` — the only service handling the mTLS ingestion path, and also the
+  sole entry point on `443` for Django Admin (proxied straight through,
+  without a client-certificate requirement -- Django's own login is the
+  trust boundary there). Terminates TLS with the server's certificate.
+
+  mTLS enforcement for `/api/v1/` is done explicitly in that location
+  block, not by nginx's SSL layer automatically: `ssl_verify_client` must
+  be `optional_no_ca`, not `optional` or `on` -- plain `optional` still
+  hard-rejects (with nginx's own canned response, before any location/`if`
+  logic runs) any *presented* certificate that fails verification, which
+  would also break serving `/admin/` unauthenticated on the same port.
+  Reject with ordinary status codes checked against `$ssl_client_verify` /
+  `$ssl_client_s_dn` -- not nginx's own `495`/`496`: those are internal
+  pseudo-codes tied to nginx's automatic SSL enforcement, and an explicit
+  `return 495`/`496` gets silently replaced with nginx's canned `400`
+  page instead of actually being sent. There is also no built-in nginx
+  variable for just the CN of the client certificate's subject; extract
+  it from `$ssl_client_s_dn` with a regex `map` block. On success, forward
+  the verified CN in a header (e.g. `X-Client-Cert-CN`) to `django`.
 
 All services on one Docker network, defined in `docker-compose.yml`. Use
 named volumes for `postgres` and `grafana` data so `docker compose down`

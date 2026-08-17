@@ -203,12 +203,14 @@ the change takes effect.
   probe can't reach the server (spooled readings are retried every
   cycle).
 - **nginx / mTLS handshake failures**: `docker compose logs nginx` on
-  the server. A `495` response means the client cert failed
-  verification; `496` means no client cert was presented at all.
+  the server, for a request to `/api/v1/ingest`. A `401` means no
+  client certificate was presented at all; `403` means one was
+  presented but failed verification against the internal CA.
 - **Rejected ingests**: `docker compose logs django` on the server. A
-  `404` means the probe's UUID isn't registered; `403` means it's
+  `404` means the probe's UUID isn't registered; `403` here means it's
   either inactive or the certificate CN doesn't match the payload's
-  `probe_id`.
+  `probe_id` (same status code as the nginx-layer rejection above, but
+  a different log to check).
 - **WireGuard tunnel not connecting**: run `sudo wg show wg0` on both
   the server and the probe. `latest handshake: (none)` on the probe
   usually means the WireGuard UDP port isn't actually open on the

@@ -8,6 +8,15 @@ events {
 }
 
 http {
+    # nginx has no built-in "just the CN" variable -- $ssl_client_s_dn
+    # is the whole subject DN (e.g. "CN=<uuid>,O=WeatherNet"). Extract
+    # the CN with a regex map so it works regardless of what other
+    # fields are present or their order.
+    map $ssl_client_s_dn $ssl_client_cn {
+        default "";
+        "~CN=(?<CN>[^,]+)" $CN;
+    }
+
     server {
         listen 443 ssl;
         server_name ${SERVER_PUBLIC_IP};
@@ -15,13 +24,18 @@ http {
         ssl_certificate     /etc/weathernet/pki/server.cert.pem;
         ssl_certificate_key /etc/weathernet/pki/server.key.pem;
 
-        # mTLS: verify every client against the internal CA. Using
-        # "optional" (rather than "on") plus the explicit checks below
-        # is what lets us return the distinct 495/496 codes the API
-        # contract promises for "invalid cert" vs. "no cert" -- this is
-        # still plain nginx configuration, no application code involved.
+        # mTLS: verify every client against the internal CA, enforced
+        # below rather than by nginx's SSL layer itself. "optional_no_ca"
+        # (not "optional") is required for that: plain "optional" still
+        # hard-rejects the TLS handshake -- with nginx's own canned 400
+        # response, before any location/if logic runs -- for any client
+        # that presents a certificate failing verification. It only
+        # tolerates a client presenting *no* certificate at all.
+        # optional_no_ca defers that decision to us, via $ssl_client_verify
+        # below, which is what lets /api/v1/ require a valid cert while
+        # /admin/ (below) stays reachable without one on the same port.
         ssl_client_certificate /etc/weathernet/pki/ca.cert.pem;
-        ssl_verify_client optional;
+        ssl_verify_client optional_no_ca;
         ssl_verify_depth 1;
 
         client_max_body_size 64k;
@@ -29,11 +43,16 @@ http {
         # The only path probes ever call. Everything else is rejected
         # below without being proxied anywhere.
         location /api/v1/ {
-            if ($ssl_client_verify = NONE) {
-                return 496;
+            # Note: nginx's own "495"/"496" status codes are internal
+            # pseudo-codes tied to its own SSL-required enforcement --
+            # returning them explicitly here does not work as it looks
+            # like it should (nginx silently substitutes its own canned
+            # 400 response instead). Use ordinary status codes.
+            if ($ssl_client_s_dn = "") {
+                return 401;
             }
             if ($ssl_client_verify != SUCCESS) {
-                return 495;
+                return 403;
             }
 
             proxy_pass http://django:8000;
@@ -42,7 +61,7 @@ http {
             # set here, after successful client certificate
             # verification, and Django is unreachable except through
             # this proxy.
-            proxy_set_header X-Client-Cert-CN $ssl_client_s_dn_cn;
+            proxy_set_header X-Client-Cert-CN $ssl_client_cn;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-Proto $scheme;
