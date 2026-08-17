@@ -90,7 +90,7 @@ fi
 # Ownership of the weathernet-probe half is handed to RUN_USER right
 # after, since that service runs unprivileged (see step 3).
 log "Redeeming enrollment token"
-ENROLL_ARGS=(--server "${SERVER}" --token "${TOKEN}")
+ENROLL_ARGS=(--server "${SERVER}" --token "${TOKEN}" --ssh-user "${RUN_USER}")
 if [[ -n "${FINGERPRINT}" ]]; then
   ENROLL_ARGS+=(--fingerprint "${FINGERPRINT}")
 fi
@@ -129,5 +129,8 @@ WeatherNet probe ${PROBE_ID} is enrolled and running as user '${RUN_USER}'.
 You should see this probe appear in Grafana within its report interval.
 It should also be SSH-reachable from the server at its WireGuard tunnel
 IP within about a minute -- the server's peer-sync timer picks it up
-automatically, nothing else to do.
+automatically, nothing else to do. If the server had
+SERVER_SSH_PUBLIC_KEY_HOST_PATH configured, it can already SSH straight
+in with no key setup; otherwise see the top-level README for the
+agent-forwarding fallback.
 SUMMARY

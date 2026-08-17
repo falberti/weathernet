@@ -182,3 +182,15 @@ SERVER_CERT_PATH = os.path.join(WEATHERNET_PKI_DIR, "server.cert.pem")
 WIREGUARD_SERVER_PUBLIC_KEY_PATH = os.environ.get(
     "WIREGUARD_SERVER_PUBLIC_KEY_PATH", "/etc/weathernet/wireguard/server_public.key"
 )
+
+# The VM's own SSH public key -- handed to a probe during enrollment so
+# the server can SSH into it with no manual key exchange (PROJECT_SPEC.md
+# Section 5.7). This is the *container-internal* mount path; the actual
+# host-side key (e.g. /home/ubuntu/.ssh/id_ed25519.pub) is configured via
+# SERVER_SSH_PUBLIC_KEY_HOST_PATH in .env and wired into docker-compose.yml
+# -- Django never needs to know the real host path. Best-effort: a
+# missing/unreadable key must never fail enrollment, it's a convenience
+# layered on top, not a requirement of it (see probes/wireguard.py).
+SERVER_SSH_PUBLIC_KEY_PATH = os.environ.get(
+    "SERVER_SSH_PUBLIC_KEY_PATH", "/etc/weathernet/ssh/id_ed25519.pub"
+)

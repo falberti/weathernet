@@ -29,7 +29,27 @@ class Probe(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
     hardware_type = models.CharField(max_length=32, choices=HardwareType.choices)
-    location = models.CharField(max_length=200, blank=True)
+
+    # Where the probe physically is -- an operator's own reference, not a
+    # structured/geocoded address, hence plain free text for the first
+    # one. Coordinates are separate, optional fields: the probe itself
+    # never knows or reports its own GPS position, these are entered by
+    # the operator.
+    location_address = models.CharField(max_length=200, blank=True)
+    location_latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True
+    )
+    location_longitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True
+    )
+
+    # Who to contact about this probe. Both optional at the DB level (so
+    # this doesn't break already-enrolled probes), but owner_email is the
+    # primary contact in practice -- owner_phone is a genuinely optional
+    # secondary one.
+    owner_email = models.EmailField(blank=True)
+    owner_phone = models.CharField(max_length=32, blank=True)
+
     notes = models.TextField(blank=True)
 
     # WireGuard remote access (PROJECT_SPEC.md Section 5.7) -- a second,

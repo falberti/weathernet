@@ -47,6 +47,7 @@ short-lived, single-use token created in Django Admin.
     "server_endpoint": "<server-public-ip>:51820",
     "server_tunnel_ip": "10.10.0.1"
   },
+  "server_ssh_public_key": "ssh-ed25519 AAAA... ubuntu@weather",
   "report_interval_seconds": 300
 }
 ```
@@ -56,6 +57,10 @@ itself when writing `probe.yaml`. `wireguard.server_endpoint` (public
 IP:port, for `Endpoint =`) and `wireguard.server_tunnel_ip` (this
 server's own WireGuard address, for this probe's `AllowedIPs =`) are
 two different addresses -- don't conflate them when rendering `wg0.conf`.
+`server_ssh_public_key` is `null` when `SERVER_SSH_PUBLIC_KEY_HOST_PATH`
+isn't configured or isn't readable server-side -- `enroll.py` treats that
+as informational, not fatal (the probe still enrolls; it just prints a
+note that another access method is needed).
 
 ### Responses
 

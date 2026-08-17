@@ -31,7 +31,11 @@ and [`PROJECT_SPEC.md`](../PROJECT_SPEC.md) for the full design.
   locally via `openssl`/`wg` (private keys never leave this device),
   optionally pins the server's TLS certificate by SHA-256 fingerprint,
   calls `POST /api/v1/enroll`, and writes `probe.yaml` and
-  `/etc/wireguard/wg0.conf` from the response. No new code under
+  `/etc/wireguard/wg0.conf` from the response. If the response includes
+  the server's SSH public key, also appends it to `authorized_keys` for
+  the user named by `--ssh-user` (resolved via `pwd.getpwnam()`, since
+  this script itself runs under `sudo` and can't trust `$HOME`) -- see
+  `PROJECT_SPEC.md` Section 5.7 step 7. No new code under
   `weathernet_probe/` -- this is a standalone script, not part of the
   daemon package, and doesn't add a `cryptography` dependency to the
   probe's runtime requirements (it shells out to `openssl`/`wg`

@@ -29,10 +29,14 @@ and [`PROJECT_SPEC.md`](../PROJECT_SPEC.md) for the full design.
   the VM host directly, not inside Docker.
 - `django_app/` -- the Django project.
   - `probes/` -- the registry, plus enrollment: `models.py` (`Probe`,
-    `EnrollmentToken`), `admin.py` (generates a token and prints the
-    exact probe-side command when you add one), `views.py`
-    (`POST /api/v1/enroll`), `ca.py` (CSR signing via `cryptography`),
-    `wireguard.py` (tunnel IP allocation + peer rendering).
+    with optional location/coordinates and owner contact fields for
+    operator reference, plus `EnrollmentToken`), `admin.py` (generates a
+    token and prints the exact probe-side command when you add one),
+    `views.py` (`POST /api/v1/enroll`), `ca.py` (CSR signing via
+    `cryptography`), `wireguard.py` (tunnel IP allocation + peer
+    rendering), `ssh.py` (best-effort read of the VM's own SSH public
+    key, handed to a probe during enrollment -- see
+    `SERVER_SSH_PUBLIC_KEY_HOST_PATH` in `.env.example`).
   - `telemetry/` -- the ingestion endpoint and the two TimescaleDB
     hypertable models (`SensorReading`, `ProbeHealth`).
 - `nginx/nginx.conf.template` -- rendered into `nginx.conf` (gitignored)

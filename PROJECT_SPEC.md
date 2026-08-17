@@ -241,7 +241,17 @@ weathernet/
   CA's certificate **and private key** bind-mounted read-only from
   `server/pki/` (needed to sign CSRs during enrollment — see 5.5/5.7; this
   is the one meaningful new attack-surface trade-off introduced by
-  auto-enrollment, and it's called out again there deliberately).
+  auto-enrollment, and it's called out again there deliberately). Also has
+  the VM's own SSH public key bind-mounted read-only, host path
+  configurable via `.env` (see 5.6/5.7) — handed to a probe during
+  enrollment so the server can SSH into it without a manual key exchange.
+
+  Implementation note on the Dockerfile: `COPY . .` runs as root, before
+  the image switches to a non-root user for the final `USER` directive.
+  Without an explicit `chown` of the app directory to that user in
+  between, the container can't write `staticfiles/` (`collectstatic`
+  fails) or anything else at runtime — this bit a real deployment, budget
+  for it explicitly rather than discovering it from a permission error.
 - `grafana` — published on its own host port (e.g. `3000`) for the
   operator to view dashboards directly by IP. Pre-provisioned with a
   PostgreSQL datasource pointed at the same `postgres` service, and one
@@ -251,8 +261,12 @@ weathernet/
   without a client-certificate requirement -- Django's own login is the
   trust boundary there). Terminates TLS with the server's certificate.
 
-  mTLS enforcement for `/api/v1/` is done explicitly in that location
-  block, not by nginx's SSL layer automatically: `ssl_verify_client` must
+  mTLS enforcement for `/api/v1/ingest` is done explicitly in that
+  location block — an **exact match** (`location = /api/v1/ingest`), not
+  a prefix. This matters: `/api/v1/enroll` must fall through to the
+  unauthenticated location instead (a brand-new probe has no certificate
+  yet), and a prefix match on `/api/v1/` would incorrectly catch it too.
+  Enforcement is not done by nginx's SSL layer automatically: `ssl_verify_client` must
   be `optional_no_ca`, not `optional` or `on` -- plain `optional` still
   hard-rejects (with nginx's own canned response, before any location/`if`
   logic runs) any *presented* certificate that fails verification, which
@@ -297,7 +311,25 @@ Two apps:
   enrollment script auto-detects its own hardware (Section 5.7) and sends
   it along in the enroll request purely as a sanity check against what the
   operator declared — log a warning on mismatch, don't hard-fail on it.
-- `location` — free text, optional.
+- `location_address` — free text, optional. A human-readable description
+  of where the probe physically is (e.g. "Garden, north side of the
+  house"), not a structured postal address — free text is deliberately
+  good enough here, this is for an operator's own reference, not
+  geocoding.
+- `location_latitude`, `location_longitude` — `DecimalField(max_digits=9,
+  decimal_places=6)`, both nullable/optional, entered by the operator
+  (not derived from anything the probe reports — the probe itself never
+  knows its own GPS position in v1). Six decimal places is sub-meter
+  precision, more than this project needs but a harmless, conventional
+  choice; reject out-of-range values (`-90..90` / `-180..180`) at the
+  form level rather than trusting free input.
+- `owner_email`, `owner_phone` — free text (an `EmailField` for the
+  former), both optional at the database level so this can be added
+  without breaking already-enrolled probes, but treat `owner_email` as
+  the primary contact and `owner_phone` as a secondary, genuinely
+  optional one when designing the Admin form (e.g. field ordering,
+  helper text) — who to actually contact about a probe that's gone
+  quiet or is physically in someone's way.
 - `notes` — free text, optional.
 - `wireguard_public_key` — text, nullable. Set automatically when the
   probe's enrollment request is processed (Section 5.7) — never entered by
@@ -487,13 +519,37 @@ the migration that sets up the TimescaleDB policies, `WIREGUARD_SUBNET`
 (default `10.10.0.0/24`) and `WIREGUARD_LISTEN_PORT` (default `51820`),
 `ENROLLMENT_TOKEN_TTL_MINUTES` (default `30`), the server's own public IP
 and WireGuard endpoint info (so the admin can print ready-to-use enrollment
-commands — see 5.7), and Grafana admin user/password. `.env` itself must be
-gitignored.
+commands — see 5.7), `SERVER_SSH_PUBLIC_KEY_HOST_PATH` (default
+`/home/ubuntu/.ssh/id_ed25519.pub` — the VM's own SSH public key, bind-
+mounted read-only into `django` and handed to every probe during
+enrollment so the server can SSH into it without a manual step; see 5.7),
+and Grafana admin user/password. `.env` itself must be gitignored.
 
 The server's own WireGuard keypair is **not** an env var — like the mTLS
 CA, it's a generated file (`wireguard/server_private.key`,
 `wireguard/server_public.key`), gitignored, with the private key never
 leaving the host.
+
+**Django settings requirements beyond `.env`**, both discovered the hard
+way in an earlier pass and worth stating explicitly so they aren't lost
+in a rewrite:
+- `SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")` is
+  required, not optional, given nginx terminates TLS and proxies to
+  Django over plain HTTP internally. Without it, `request.is_secure()` is
+  always `False`, and Django's CSRF `Origin` check — which compares the
+  browser's real `https://...` Origin against what Django itself believes
+  the scheme is — rejects every POST, including Admin login, as
+  cross-origin. `SESSION_COOKIE_SECURE`/`CSRF_COOKIE_SECURE = True` should
+  follow once this is set, since the admin is genuinely HTTPS-only.
+- An explicit `LOGGING` setting that sends everything to a console
+  handler **unconditionally**, not gated on `DEBUG`. Django's own default
+  logging config only sends request-handling exceptions (i.e. anything
+  that becomes a `500`) to the console when `DEBUG=True`; with
+  `DEBUG=False` (required, see above) the only handler left is
+  `mail_admins`, which does nothing without `ADMINS` configured. Left at
+  the default, `docker compose logs django` shows gunicorn's boot
+  messages and nothing else, even across a real unhandled exception —
+  exactly the situation where an operator most needs to see a traceback.
 
 ### 5.7 Zero-Touch Probe Enrollment
 
@@ -555,12 +611,26 @@ does, via `probe/scripts/enroll.py`:
    server using the server's WireGuard public key + endpoint from the
    response, `PersistentKeepalive = 25` since the probe is almost
    certainly behind a home NAT with no port forwarding).
-7. Installs and starts both `weathernet-probe.service` and
+7. If the response includes the server's SSH public key (it's optional
+   server-side — see below), append it to the enrolling user's own
+   `~/.ssh/authorized_keys` (create `~/.ssh` with `0700` if it doesn't
+   exist, the file itself `0600`, skip appending if that exact key line
+   is already present). `setup.sh` invokes `enroll.py` with
+   `--ssh-user <the user running setup.sh>` so it knows whose home
+   directory to write into even though it runs elevated (it needs root to
+   write `/etc/weathernet-probe` and `/etc/wireguard`; resolve the
+   target user's home directory server-side via `pwd.getpwnam()`, don't
+   assume `$HOME`, which under `sudo` would resolve to root's). This is
+   what lets the server SSH straight into a newly enrolled probe with no
+   manual key copying at all — see 5.8/6.7.
+8. Installs and starts both `weathernet-probe.service` and
    `wg-quick@wg0.service`.
-8. Prints a plain confirmation: probe ID, tunnel IP, and "you should see
+9. Prints a plain confirmation: probe ID, tunnel IP, and "you should see
    this probe appear in Grafana within `report_interval_seconds`, and it
    should be SSH-reachable at `<tunnel-ip>` from the server within about a
-   minute" (see the sync timer note below).
+   minute" (see the sync timer note below) — and, if the server's SSH key
+   was installed, "the server can already SSH in directly, no key setup
+   needed."
 
 **Server-side enrollment view (`probes/views.py`, `POST /api/v1/enroll`):**
 
@@ -586,8 +656,26 @@ does, via `probe/scripts/enroll.py`:
 5. Mark the token `used_at = now()`, `resulting_probe = <the new probe>`.
 6. Respond `201` with: the signed client cert (PEM), the CA cert (PEM),
    the assigned `probe_id`, the assigned `wireguard_tunnel_ip`, the
-   server's WireGuard public key, and the server's WireGuard endpoint
-   (`<public-ip>:<port>`). See Section 7 for the exact JSON shape.
+   server's WireGuard public key, the server's WireGuard endpoint
+   (`<public-ip>:<port>`), the server's own WireGuard *tunnel* address
+   (e.g. `10.10.0.1` — not the same thing as the public endpoint above;
+   this is what the probe's own `[Peer]` block's `AllowedIPs` must be),
+   and the contents of the server's SSH public key from
+   `SERVER_SSH_PUBLIC_KEY_HOST_PATH` if that file is readable (`null` if
+   not — this is a best-effort convenience, not something that should
+   ever fail enrollment). See Section 7 for the exact JSON shape.
+
+**Ordering within the view, stated as a rule, not just an example:**
+gather and validate *everything* the response needs — signing the CSR,
+allocating the tunnel IP, reading the CA cert and the SSH public key file
+back off disk — before the `Probe`/`EnrollmentToken` writes inside the
+`transaction.atomic()` block, not just before the writes that obviously
+depend on that data. A failure raised after those writes commit but
+before the response is returned leaves a burned token and an orphaned
+`Probe` row with no certificate ever delivered to the device — a real
+failure mode hit during implementation (a file-permissions slip on the
+WireGuard public key), not a hypothetical one. If a future revision adds
+another field to the response, the same ordering applies to it too.
 
 **Applying the new WireGuard peer:** the enrollment view runs inside the
 `django` container and, same constraint as always, has no host-level
@@ -624,7 +712,13 @@ Section 3.
 1. `wireguard/generate-server-keys.sh` generates the server's keypair.
    The public key ends up in `.env`/settings so the enrollment response
    (5.7) and the admin's printed setup command can both reference it
-   without a human copying it around.
+   without a human copying it around. The private key needs restrictive
+   permissions (`umask 077` before generating it is fine) — but don't let
+   that umask also restrict the **public** key file: it's not sensitive,
+   it's read by the `django` container (a different host UID than
+   whichever user ran this script) and handed to every probe, so it needs
+   to end up world-readable (`chmod 644` after generating it), not
+   inheriting the private key's `600`.
 2. `wg-quick up wg0` is brought up on the host directly (not in Docker —
    see the note in 5.1), listening on `WIREGUARD_LISTEN_PORT`, with its own
    tunnel address `10.10.0.1` (the first address in `WIREGUARD_SUBNET`).
@@ -632,7 +726,17 @@ Section 3.
    opened, in addition to `443` for nginx and Grafana's port — call this
    out explicitly in the setup script's summary output, since it's easy to
    forget and the failure mode (tunnel silently doesn't come up) is
-   confusing to debug.
+   confusing to debug. When troubleshooting this, check the *actual*
+   firewall tool in use (`sudo iptables -L INPUT -n -v` /
+   `sudo nft list ruleset`), not just `ufw` — it may not even be
+   installed. Several cloud providers sync a local `iptables`/`nftables`
+   ruleset automatically from the provider's own console/API (a security
+   group), in which case a rule added directly on the host is only a
+   test, not a durable fix; the persistent one is opening the port in
+   that console. `sudo tcpdump -i any udp port $WIREGUARD_LISTEN_PORT -n`
+   on the server while a probe's keepalive is retrying is the fastest way
+   to tell "packets never arrive" (upstream block) from "packets arrive
+   but no handshake" (local firewall dropping them after arrival).
 4. Install the systemd timer that runs `wireguard/sync-peers.sh` every
    minute (a small `.timer` + `.service` unit pair, or a root crontab entry
    if you'd rather skip the extra unit files — either is fine, pick
@@ -650,11 +754,39 @@ not SSH reachability. A probe you've deactivated because its sensors are
 misbehaving is exactly the probe you most want to still be able to SSH
 into. Don't wire these two flags together.
 
+**Implementation trap in `sync-peers.sh` worth flagging explicitly:**
+applying the freshly-rendered config to a live interface needs
+`wg syncconf`, which needs its input already reduced to what `wg-quick
+strip` produces. The natural-looking way to chain this —
+`sudo wg syncconf wg0 <(sudo wg-quick strip wg0.conf)` — routinely fails
+with `fopen: No such file or directory`. Piping a process-substitution
+`/dev/fd/N` path through a *second*, outer `sudo` breaks because sudo
+commonly closes inherited file descriptors above stderr before exec'ing
+its target, as a security default. Write to a real temp file instead
+(`sudo wg-quick strip wg0.conf > tmpfile` as one step, `sudo wg syncconf
+wg0 tmpfile` as the next) — a real path has no fd-inheritance edge case.
+Since this script runs under `set -euo pipefail` and is called
+unconditionally from `setup.sh`'s WireGuard step, a failure here doesn't
+just skip the peer sync — it aborts the rest of `setup.sh` too, including
+whatever comes after (in v1's ordering, that's the systemd timer
+installation). A script dying partway through under `set -e` can look
+like an unrelated later step "was never implemented" when it was actually
+just never reached — worth remembering when diagnosing which of two
+symptoms is the real cause.
+
 **Reaching a probe:** the operator SSHes into the server (existing access,
 unrelated to any of this), then from there `ssh <user>@10.10.0.x` to the
 probe's tunnel address. The server acts as a bastion; the operator's own
 laptop does not need to be a WireGuard peer for v1 (see Section 12 for the
-option to add that later).
+option to add that later). Since enrollment (5.7) installs the server's
+own SSH public key into the probe's `authorized_keys` automatically, this
+should just work with no key setup on the operator's part — the earlier
+design (before that automatic install existed) required either copying
+the server's key to the probe by hand, or forwarding the operator's own
+laptop-side agent through the server with `ssh -A` for the hop. Agent
+forwarding is still the right fallback if `SERVER_SSH_PUBLIC_KEY_HOST_PATH`
+wasn't configured, doesn't resolve, or the probe was enrolled before this
+feature existed.
 
 ## 6. Probe Component
 
@@ -667,6 +799,13 @@ option to add that later).
   doesn't fight you on a generic Debian box tomorrow."
 - Must run comfortably on a Raspberry Pi 3 — keep dependencies light.
   `psutil` for health metrics is fine; avoid pulling in heavy frameworks.
+  In practice `psutil` almost always has no prebuilt wheel for a Pi's
+  exact Python-version/architecture combination and compiles its C
+  extension from source on install — `probe/scripts/setup.sh` must
+  install `python3-dev` and `build-essential` (via the system package
+  manager) before `pip install`, or that build fails outright with a
+  missing-`Python.h` error. This isn't optional/defensive, it's the
+  expected path on real Pi hardware, not an edge case.
 - Single long-running process managed by systemd (`Restart=on-failure`),
   not a cron/systemd-timer firing a fresh process each cycle — simpler to
   reason about for connection reuse and in-memory buffering state.
@@ -770,7 +909,13 @@ does at the OS level (no new code under `weathernet_probe/`, just
    keepalive the NAT mapping will time out and the server won't be able to
    re-initiate the connection).
 4. `systemctl enable --now wg-quick@wg0`.
-5. As defense in depth (the tunnel is already only reachable by the
+5. If the enrollment response included the server's SSH public key,
+   append it to the enrolling user's `~/.ssh/authorized_keys` (see
+   5.7 step 7 for the exact mechanics, including why `enroll.py` needs
+   an explicit `--ssh-user` rather than trusting `$HOME` while running
+   elevated). This is what makes the server able to SSH straight into
+   the probe with zero manual key setup once the tunnel is up.
+6. As defense in depth (the tunnel is already only reachable by the
    authenticated server peer, but a compromised server or a
    misconfiguration shouldn't hand over more than necessary): configure the
    probe's local firewall to only accept SSH on the `wg0` interface, nothing
@@ -807,11 +952,22 @@ Response `201`:
   "wireguard": {
     "tunnel_ip": "10.10.0.5",
     "server_public_key": "base64-server-wg-pubkey==",
-    "server_endpoint": "<server-public-ip>:51820"
+    "server_endpoint": "<server-public-ip>:51820",
+    "server_tunnel_ip": "10.10.0.1"
   },
+  "server_ssh_public_key": "ssh-ed25519 AAAA... ubuntu@weather",
   "report_interval_seconds": 60
 }
 ```
+
+`wireguard.server_endpoint` (public IP:port, for `Endpoint =`) and
+`wireguard.server_tunnel_ip` (this server's own WireGuard address, for
+this probe's `AllowedIPs =`) are two different addresses — a response
+missing one of them because it looked redundant with the other is a real
+mistake this project's own implementation made once already. `server_ssh_public_key`
+is `null` when `SERVER_SSH_PUBLIC_KEY_HOST_PATH` isn't configured or
+isn't readable — a missing SSH key must never fail enrollment itself,
+it's a convenience layered on top, not a requirement of it.
 
 Responses: `201` as above on success; `400` malformed payload or invalid
 CSR; `404` token hash doesn't match any token; `410` token expired or
@@ -867,18 +1023,61 @@ Idempotent where reasonably possible. Steps:
 2. Prompt for (or accept as script arguments) the server's public IP.
 3. Generate `.env` from `.env.example` if it doesn't exist, filling in a
    freshly generated Django `SECRET_KEY` and randomized default passwords
-   where the example has placeholders.
+   where the example has placeholders. If `.env` **already** exists (a
+   redeploy, not a first run), instead backfill: for every key present in
+   `.env.example` but absent from `.env`, append it with its example
+   value. This isn't optional politeness — `docker compose` substitutes
+   an *empty string* for a referenced variable that's undefined in `.env`
+   (not "leave it unset" in the container), so a new config key added to
+   `.env.example` in a later revision of this project silently becomes
+   `""` inside the container on redeploy rather than falling back to
+   whatever default the application code has, which can crash Django
+   outright (e.g. `int("")`) depending on what reads it.
 4. Run `pki/generate-ca.sh` and `pki/generate-server-cert.sh <public-ip>` if
    the CA doesn't already exist. Ensure the resulting key files have
    permissions that allow the `django` container's bind mount to read them
-   (Section 5.1) without being world-readable on the host.
+   (Section 5.1) without being world-readable on the host — grant access
+   to the container's fixed UID (see the Dockerfile note in 5.1)
+   specifically, e.g. `chown` the CA key to that UID, rather than making
+   it world-readable.
+
+   Also generate the server's WireGuard keypair here (`wireguard/
+   generate-server-keys.sh`) if it doesn't already exist — **before**
+   `docker compose up`, not after, even though bringing the tunnel itself
+   up happens later (step 10). The public key is bind-mounted read-only
+   into `django` (5.1/5.7); if that file doesn't exist yet when the
+   container first starts, Docker creates an empty directory in its place
+   instead of failing loudly, and every enrollment fails obscurely
+   afterward. Install `wireguard-tools` first if the `wg` CLI isn't
+   present.
 5. Render `nginx.conf` from the template with the public IP, including the
    `ssl_verify_client optional_no_ca` setting and the `/api/v1/ingest`
    location block's explicit `$ssl_client_verify` check, both from
    Section 5.1.
-6. `docker compose build && docker compose up -d`.
+6. `docker compose build && docker compose up -d`, followed by an
+   explicit `docker compose restart nginx`. The restart is not redundant:
+   `nginx.conf` is bind-mounted, not baked into the image, and `docker
+   compose up -d` only recreates a container when the *service
+   definition* in `docker-compose.yml` changed — it has no visibility
+   into a bind-mounted file's contents. On a redeploy where only the
+   rendered `nginx.conf` changed, an already-running nginx container
+   silently keeps serving whatever config it read at its last actual
+   start; this script looking like it succeeded is not evidence the new
+   config took effect. The same principle applies to any other script
+   that regenerates a bind-mounted config file for an already-running
+   service.
 7. Wait for Postgres to be ready, then run Django migrations inside the
-   `django` container.
+   `django` container, then `collectstatic --noinput` (Admin's CSS/JS are
+   served by WhiteNoise, not nginx — see 5.1's Dockerfile note), then an
+   explicit `docker compose restart django`. The restart here is not
+   optional either, and for a different reason than nginx's: WhiteNoise
+   indexes `STATIC_ROOT` once, at process (gunicorn worker) startup —
+   production mode has no autorefresh. `collectstatic` just wrote files
+   into a directory the already-running workers scanned *before* those
+   files existed; every static asset 404s until something restarts the
+   process. Skipping this restart is exactly the kind of thing that looks
+   fine (the command exits `0`) and then produces a completely unstyled
+   Admin login page.
 8. Prompt to create a Django superuser (interactive `createsuperuser`, or
    accept `--noinput` env-based creation for automation).
 9. Migrations from step 7 already create the extension, hypertables, and
@@ -886,14 +1085,16 @@ Idempotent where reasonably possible. Steps:
    query `timescaledb_information.hypertables` and print a confirmation
    that both hypertables exist, so a silently-failed migration doesn't go
    unnoticed.
-10. Run `wireguard/generate-server-keys.sh` if the server doesn't already
-    have a WireGuard keypair, then bring up `wg-quick up wg0` (installing
-    `wireguard-tools` first if missing). Install the systemd timer that
-    runs `wireguard/sync-peers.sh` every minute (Section 5.8). Remind the
-    operator, loudly, that the WireGuard UDP port needs to be opened in
+10. Bring the tunnel up: run `wireguard/sync-peers.sh` (this both renders
+    `wg0.conf` from the current, possibly-empty probe registry and brings
+    up `wg-quick@wg0`, since the script detects there's no active
+    interface yet — see Section 5.8 for exactly how). Then install the
+    systemd timer that runs `wireguard/sync-peers.sh` every minute
+    (Section 5.8), so future enrollments don't need a manual step. Remind
+    the operator, loudly, that the WireGuard UDP port needs to be opened in
     their firewall/security group — this is easy to miss since nothing
     fails locally when it's closed, it just silently doesn't work from
-    outside.
+    outside (see 5.8 for how to actually diagnose that when it happens).
 11. Print a summary: URLs for Grafana and Django Admin, and a reminder of
     the enrollment flow — "to add a probe, create an `EnrollmentToken` in
     Django Admin; it will print the exact command to run on the probe."
@@ -907,16 +1108,22 @@ design — see Section 5.7.
    <sha256>`. Fail with a clear usage message if `--server` or `--token`
    is missing; warn (but don't fail) if `--fingerprint` is missing, per
    Section 5.7's note on what that trade-off actually means.
-2. Check Python 3 version; create a virtualenv; install
-   `probe/requirements.txt`; install `wireguard-tools` via the system
-   package manager if missing.
-3. Run `probe/scripts/enroll.py` with the parsed arguments — this does
-   everything described in Sections 5.7 and 6.7: hardware detection, local
-   key/CSR generation, optional TLS fingerprint pinning, the
-   `/api/v1/enroll` call, and writing `probe.yaml`, the cert files, and
-   `wg0.conf` to their final locations. Abort with whatever clear error
-   `enroll.py` produced (expired token, fingerprint mismatch, etc.) rather
-   than swallowing it.
+2. Check Python 3 version; create a virtualenv; install `python3-dev` and
+   `build-essential` via the system package manager first (see 6.1 for
+   why this has to happen before the next sub-step, not just "if pip
+   complains"), then `probe/requirements.txt`; install `wireguard-tools`
+   via the system package manager if missing.
+3. Run `probe/scripts/enroll.py` with the parsed arguments, plus
+   `--ssh-user <the user running this script>` (so `enroll.py` — which
+   runs under `sudo` to write `/etc/weathernet-probe` and
+   `/etc/wireguard` — knows whose `~/.ssh/authorized_keys` to install the
+   server's SSH key into; see 5.7 step 7). This does everything described
+   in Sections 5.7 and 6.7: hardware detection, local key/CSR generation,
+   optional TLS fingerprint pinning, the `/api/v1/enroll` call, writing
+   `probe.yaml`, the cert files, and `wg0.conf` to their final locations,
+   and installing the server's SSH key if the response included one.
+   Abort with whatever clear error `enroll.py` produced (expired token,
+   fingerprint mismatch, etc.) rather than swallowing it.
 4. Install the systemd unit (`weathernet-probe.service`) from the template,
    substituting the actual install path and venv path.
 5. `systemctl enable --now weathernet-probe` and
@@ -972,12 +1179,20 @@ The top-level `README.md` must include, in this order:
    this version).
 10. How to reach a probe remotely for troubleshooting (SSH into the
     server, then to the probe's WireGuard tunnel IP — should be live within
-    about a minute of enrollment via the sync timer, Section 5.8).
+    about a minute of enrollment via the sync timer, Section 5.8). Note
+    that this should need no key setup at all if
+    `SERVER_SSH_PUBLIC_KEY_HOST_PATH` is configured (5.6/5.7); mention
+    `ssh -A` agent forwarding only as the fallback for when it isn't.
 11. Known limitations of v1 (link to or restate Section 12 below).
 12. Troubleshooting basics: checking probe logs, checking nginx logs for
     mTLS handshake failures, checking Django logs for rejected ingests or
-    failed enrollments, and checking `wg show` on both the server and the
-    probe for WireGuard handshake status.
+    failed enrollments (`docker compose logs django` — requires the
+    `LOGGING` config from 5.6 to actually show anything, see that section),
+    and diagnosing a WireGuard tunnel that won't come up: compare `wg show`
+    on both the server and the probe first (matching keys but no
+    `endpoint`/handshake on the server side means packets aren't arriving
+    at all, not a config problem), then see 5.8 for the `tcpdump` +
+    `iptables`/`nftables` sequence that actually finds a blocked port.
 
 ## 11. Non-Functional Requirements
 
@@ -1035,6 +1250,18 @@ mistakes an intentional cut for an oversight:
   a separate, minimal process with a narrower blast radius if the web app
   is ever compromised — not necessary at this project's scale, but the
   honest next step if that trade-off ever stops feeling comfortable.
+- **SSH host key verification for the server → probe direction.**
+  Enrollment (5.7) installs the server's SSH *public key* onto the probe
+  so the server can authenticate itself as a client, but does nothing
+  about the reverse — the probe's own SSH host key is still
+  trust-on-first-use (the operator sees the usual "authenticity of this
+  host can't be established" prompt the first time). Pinning the probe's
+  host key automatically (e.g. reading it back during enrollment over the
+  already-authenticated WireGuard tunnel and writing it into the server's
+  `known_hosts`) would close that gap; not done in v1 because it adds a
+  chicken-and-egg ordering problem (the tunnel needs to be up first) for
+  a risk that's low at this project's scale (an attacker would need to be
+  on-path for the *first* connection specifically).
 - **The operator's own device as a WireGuard peer.** v1 treats the server
   as the only bastion into the WireGuard subnet; the operator reaches
   probes by SSHing into the server first. Adding the operator's laptop/
@@ -1063,56 +1290,3 @@ mistakes an intentional cut for an oversight:
 - **High availability / scaling.** Single server VM, single
   Postgres/TimescaleDB instance handling both relational and time-series
   data. No clustering, no failover, no read replicas.
-
-## 13. Suggested Build Order
-
-A reasonable sequence for implementing this (adjust as needed, but doing
-the PKI scripts before anything that depends on mTLS working will save
-time):
-
-1. Repository scaffolding + `.gitignore` + this spec committed.
-2. PKI scripts (`generate-ca.sh`, `generate-server-cert.sh`) — test them
-   standalone with `openssl` before wiring anything else to them. No more
-   `generate-probe-cert.sh` in this version — per-probe issuance now lives
-   in the enrollment view (step 6 below).
-3. Django project + `probes` app (just the `Probe` model + Admin for now)
-   + Admin, backed by Postgres, all in Docker Compose (without nginx/mTLS
-   yet — expose Django directly for local testing at this stage).
-4. `telemetry` app + ingestion endpoint, writing to the hypertables
-   (including the migrations that create the extension, hypertables, and
-   policies from Section 5.3). Test with plain `curl` and a
-   manually-inserted `Probe` row before adding mTLS.
-5. Add nginx in front of Django with `ssl_verify_client optional_no_ca` and
-   the explicit `$ssl_client_verify` check in the `/api/v1/ingest` location
-   block (Section 5.1) — test this in isolation first: confirm nginx itself
-   rejects a request with no client cert, and separately that
-   `X-Client-Cert-CN` arrives correctly at Django for a request with a
-   valid one; re-test the ingestion flow through nginx instead of directly.
-6. Enrollment: `EnrollmentToken` model + the `save_model()` admin behavior,
-   `probes/ca.py` (CSR signing with `cryptography`), `probes/wireguard.py`
-   (tunnel IP allocation), and the `/api/v1/enroll` view tying them
-   together. Test the whole loop with `curl` and a manually-generated CSR
-   before writing `enroll.py` on the probe side — you want to know the
-   server half works in isolation first.
-7. Grafana provisioning (datasource + example dashboard).
-8. Probe: config loading, mock sensors, health metrics, then the mTLS
-   transport client and spool, then the systemd-managed main loop — all of
-   this can be built and tested against a manually-inserted `Probe` row
-   and manually-issued test cert, independent of the enrollment flow.
-9. `probe/scripts/enroll.py` and the WireGuard side of things: server-side
-   keygen + `wg-quick up`, the `generate_wireguard_peers` management
-   command, `sync-peers.sh` and its timer, and the probe-side key
-   generation + `wg0.conf` rendering. This is the piece that finally
-   connects steps 6 and 8 end-to-end — a good point to do a full real
-   enrollment test against a physical Raspberry Pi.
-10. Setup and deploy scripts on both sides, tested against a clean VM and a
-    clean Raspberry Pi respectively.
-11. README.
-
----
-
-If anything in this spec is ambiguous once you're actually implementing
-it, prefer the option that keeps the sensor plugin interface and the
-probe/server data contract (Section 7) stable — those are the two things
-most likely to be extended in a v2, and it's cheaper to get them right now
-than to migrate them later.

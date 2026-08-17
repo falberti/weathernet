@@ -9,6 +9,8 @@ scripts/setup.sh -- see PROJECT_SPEC.md Section 5.7/6.7.
 """
 import argparse
 import hashlib
+import os
+import pwd
 import socket
 import ssl
 import subprocess
@@ -157,7 +159,48 @@ def write_wireguard_config(wg_private_key, wg):
     WIREGUARD_CONFIG_PATH.chmod(0o600)
 
 
-def enroll(server: str, token: str, fingerprint: str | None) -> None:
+def install_authorized_key(ssh_user: str, public_key: str) -> None:
+    """Append the server's SSH public key to ssh_user's authorized_keys,
+    so the server can SSH into this probe with no manual key exchange
+    (PROJECT_SPEC.md Section 5.7).
+
+    This script runs elevated (it also writes /etc/weathernet-probe and
+    /etc/wireguard, both root-only), so `$HOME`/`Path.home()` here would
+    resolve to root's home, not the actual operator's -- ssh_user is
+    resolved explicitly via pwd instead, and every file this touches is
+    chowned back to that user.
+    """
+    try:
+        pw = pwd.getpwnam(ssh_user)
+    except KeyError:
+        print(f"WARNING: no such user '{ssh_user}' -- skipping SSH key install.", file=sys.stderr)
+        return
+
+    key_line = public_key.strip()
+    if not key_line:
+        return
+
+    ssh_dir = Path(pw.pw_dir) / ".ssh"
+    ssh_dir.mkdir(parents=True, exist_ok=True)
+    os.chown(ssh_dir, pw.pw_uid, pw.pw_gid)
+    ssh_dir.chmod(0o700)
+
+    authorized_keys = ssh_dir / "authorized_keys"
+    existing = authorized_keys.read_text() if authorized_keys.exists() else ""
+    if key_line in existing:
+        return  # already installed -- setup.sh is meant to be re-runnable
+
+    with authorized_keys.open("a") as f:
+        if existing and not existing.endswith("\n"):
+            f.write("\n")
+        f.write(key_line + "\n")
+    os.chown(authorized_keys, pw.pw_uid, pw.pw_gid)
+    authorized_keys.chmod(0o600)
+
+    print(f"Installed the server's SSH public key into {authorized_keys}")
+
+
+def enroll(server: str, token: str, fingerprint: str | None, ssh_user: str | None = None) -> None:
     hardware_type = detect_hardware_type()
     print(f"Detected hardware type: {hardware_type}")
 
@@ -223,6 +266,16 @@ def enroll(server: str, token: str, fingerprint: str | None) -> None:
     print(f"Wrote {CONFIG_DIR / 'probe.yaml'} and {WIREGUARD_CONFIG_PATH}")
     print(f"WireGuard tunnel IP: {data['wireguard']['tunnel_ip']}")
 
+    server_ssh_key = data.get("server_ssh_public_key")
+    if server_ssh_key and ssh_user:
+        install_authorized_key(ssh_user, server_ssh_key)
+    elif not server_ssh_key:
+        print(
+            "No server SSH public key in the response -- the server may not have "
+            "SERVER_SSH_PUBLIC_KEY_HOST_PATH configured. You'll need another way "
+            "in (e.g. `ssh -A` agent forwarding through the server)."
+        )
+
 
 def main():
     parser = argparse.ArgumentParser(description="Redeem a WeatherNet enrollment token")
@@ -233,8 +286,13 @@ def main():
         default=None,
         help="Server certificate SHA-256 fingerprint, for TLS pinning (recommended)",
     )
+    parser.add_argument(
+        "--ssh-user",
+        default=None,
+        help="Local user whose authorized_keys should receive the server's SSH public key",
+    )
     args = parser.parse_args()
-    enroll(args.server, args.token, args.fingerprint)
+    enroll(args.server, args.token, args.fingerprint, args.ssh_user)
 
 
 if __name__ == "__main__":

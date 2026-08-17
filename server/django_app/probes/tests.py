@@ -71,11 +71,14 @@ class EnrollmentTestBase:
         ca_key_path, ca_cert_path = _build_test_ca(tmp_path)
         wg_pubkey_path = tmp_path / "server_public.key"
         wg_pubkey_path.write_text("test-server-wg-pubkey=\n")
+        ssh_pubkey_path = tmp_path / "id_ed25519.pub"
+        ssh_pubkey_path.write_text("ssh-ed25519 AAAAtestkey ubuntu@test\n")
 
         cls._settings_override = override_settings(
             CA_KEY_PATH=str(ca_key_path),
             CA_CERT_PATH=str(ca_cert_path),
             WIREGUARD_SERVER_PUBLIC_KEY_PATH=str(wg_pubkey_path),
+            SERVER_SSH_PUBLIC_KEY_PATH=str(ssh_pubkey_path),
             WIREGUARD_SUBNET="10.10.0.0/24",
             SERVER_PUBLIC_IP="203.0.113.10",
             WIREGUARD_LISTEN_PORT=51820,
@@ -122,6 +125,7 @@ class EnrollViewTests(EnrollmentTestBase, TestCase):
         self.assertEqual(body["wireguard"]["tunnel_ip"], "10.10.0.2")
         self.assertEqual(body["wireguard"]["server_tunnel_ip"], "10.10.0.1")
         self.assertEqual(body["wireguard"]["server_public_key"], "test-server-wg-pubkey=")
+        self.assertEqual(body["server_ssh_public_key"], "ssh-ed25519 AAAAtestkey ubuntu@test")
 
         probe = Probe.objects.get(id=body["probe_id"])
         self.assertEqual(probe.name, "garden-station")
@@ -137,6 +141,15 @@ class EnrollViewTests(EnrollmentTestBase, TestCase):
         cert = x509.load_pem_x509_certificate(body["client_cert_pem"].encode())
         cn = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
         self.assertEqual(cn, str(probe.id))
+
+    @override_settings(SERVER_SSH_PUBLIC_KEY_PATH="/nonexistent/id_ed25519.pub")
+    def test_missing_ssh_key_file_degrades_gracefully(self):
+        # A missing/unreadable SSH public key must never fail enrollment
+        # itself -- it's a best-effort convenience layered on top.
+        raw_token, _ = self._create_token()
+        response = self._enroll(raw_token)
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertIsNone(response.json()["server_ssh_public_key"])
 
     def test_unknown_token_is_rejected(self):
         response = self._enroll("not-a-real-token")

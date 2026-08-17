@@ -53,6 +53,13 @@ services:
       # Public only -- handed back to a probe during enrollment so it
       # can render its own wg0.conf.
       - ./wireguard/server_public.key:/etc/weathernet/wireguard/server_public.key:ro
+      # Public only -- the VM's own SSH public key, handed to a probe
+      # during enrollment so the server can SSH into it directly, no
+      # manual key copying. Host path configurable (see .env.example);
+      # best-effort on the Django side if this doesn't resolve to a real
+      # file (see probes/wireguard.py) -- enrollment must not fail
+      # because of it.
+      - ${SERVER_SSH_PUBLIC_KEY_HOST_PATH}:/etc/weathernet/ssh/id_ed25519.pub:ro
     depends_on:
       postgres:
         condition: service_healthy

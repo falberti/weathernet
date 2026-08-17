@@ -13,10 +13,27 @@ from .models import EnrollmentToken, Probe
 class ProbeAdmin(admin.ModelAdmin):
     list_display = ("name", "hardware_type", "is_active", "last_seen_at", "wireguard_tunnel_ip")
     list_filter = ("hardware_type", "is_active")
-    search_fields = ("name", "id", "location")
+    search_fields = ("name", "id", "location_address", "owner_email")
     # id is generated at enrollment time (see EnrollmentTokenAdmin below),
     # not chosen by hand -- shown for reference, not editable.
     readonly_fields = ("id", "created_at", "last_seen_at", "last_health_summary")
+    fieldsets = (
+        (None, {"fields": ("id", "name", "hardware_type", "is_active", "notes")}),
+        (
+            "Location",
+            {"fields": ("location_address", "location_latitude", "location_longitude")},
+        ),
+        (
+            "Contact",
+            {
+                "fields": ("owner_email", "owner_phone"),
+                "description": "Who to contact about this probe -- email is the primary "
+                "contact, phone is optional.",
+            },
+        ),
+        ("WireGuard", {"fields": ("wireguard_public_key", "wireguard_tunnel_ip")}),
+        ("Status", {"fields": ("created_at", "last_seen_at", "last_health_summary")}),
+    )
 
 
 @admin.register(EnrollmentToken)

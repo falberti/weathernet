@@ -8,7 +8,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import ca
+from . import ca, ssh
 from .models import EnrollmentToken, Probe
 from .serializers import EnrollRequestSerializer
 from .wireguard import SubnetExhaustedError, allocate_tunnel_ip, read_server_public_key, server_tunnel_ip
@@ -99,6 +99,10 @@ class EnrollView(APIView):
                     # for Endpoint=).
                     "server_tunnel_ip": server_tunnel_ip(),
                 },
+                # None if SERVER_SSH_PUBLIC_KEY_PATH isn't configured or
+                # readable -- best-effort convenience, never a reason to
+                # fail enrollment itself (see ssh.py).
+                "server_ssh_public_key": ssh.read_server_public_key(),
                 "report_interval_seconds": DEFAULT_REPORT_INTERVAL_SECONDS,
             }
 

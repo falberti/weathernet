@@ -126,6 +126,13 @@ still enrolls, but has no way to confirm it's actually talking to your
 server for that one bootstrap request (it prints a clear warning when
 you skip it, rather than silently reducing the guarantee).
 
+Once enrolled, open that `Probe` in Django Admin and optionally fill in
+its location (a free-text description plus GPS coordinates) and owner
+contact info (email, and an optional phone number) -- useful once you
+have more than one or two probes and need to remember where a given one
+physically is or who to ask about it. None of this affects enrollment or
+ingestion; it's operator reference data only.
+
 ## Adding a second probe
 
 Repeat the "Probe setup" steps above -- generate another token, run
@@ -167,6 +174,20 @@ WireGuard), then hop to the probe's tunnel IP:
 ```bash
 ssh <server-user>@<server-public-ip>
 ssh <probe-user>@10.10.0.x
+```
+
+If the server's `.env` has `SERVER_SSH_PUBLIC_KEY_HOST_PATH` pointing at
+a real key (the default is `/home/ubuntu/.ssh/id_ed25519.pub`), the
+second hop needs **no key setup at all** -- enrollment installs that
+public key into the probe's `authorized_keys` automatically. If it
+wasn't configured, or the probe was enrolled before that server setting
+existed, the fallback is SSH agent forwarding from your own laptop
+(so the private key never has to live on the server):
+
+```bash
+ssh-add -l                          # confirm your key is loaded locally
+ssh -A <server-user>@<server-public-ip>
+ssh <probe-user>@10.10.0.x          # uses the forwarded agent
 ```
 
 The server is the only bastion into the WireGuard subnet for v1 -- your
