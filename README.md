@@ -231,11 +231,24 @@ to wait for the next tick.
   detail directly, so the probe's own terminal output is often the
   fastest place to look first.
 - **WireGuard tunnel not connecting**: run `sudo wg show wg0` on both
-  the server and the probe. `latest handshake: (none)` on the probe
-  usually means the WireGuard UDP port isn't actually open on the
-  server's firewall/security group; on the server, a missing peer entry
-  means `wireguard/sync-peers.sh` hasn't been run since that probe's
-  keys/IP were saved in Django Admin.
+  the server and the probe. If the keys match on both sides but the
+  server's peer entry shows no `endpoint`/`latest handshake` while the
+  probe shows bytes sent but none received, the server is never
+  actually seeing the probe's packets -- almost always the WireGuard UDP
+  port not actually open. Confirm with
+  `sudo tcpdump -i any udp port 51820 -n` on the server while the probe
+  is running (it retries every 25s): no packets at all means the block
+  is upstream (the cloud provider's security group); packets arriving
+  but no handshake means something local is dropping them after
+  arrival. **Check the actual firewall in use, not just `ufw`** -- some
+  providers manage a local `iptables`/`nftables` ruleset automatically
+  from their console's security group (`sudo iptables -L INPUT -n -v`
+  or `sudo nft list ruleset`), and a rule added directly on the host may
+  not survive a reboot or the next security-group sync -- the durable
+  fix is opening the port in the provider's own console, not just
+  locally. On the server, a missing peer entry entirely (not just a
+  stuck handshake) means `wireguard/sync-peers.sh` hasn't been run since
+  that probe's keys/IP were saved in Django Admin.
 
 See [`server/README.md`](server/README.md) and
 [`probe/README.md`](probe/README.md) for component-specific detail.
