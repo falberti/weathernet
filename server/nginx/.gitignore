@@ -1,0 +1,3 @@
+# Rendered from nginx.conf.template at setup time; embeds the server's
+# public IP.
+nginx.conf

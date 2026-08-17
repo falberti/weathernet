@@ -1,0 +1,67 @@
+# Rendered into nginx.conf by scripts/setup.sh, which substitutes
+# ${SERVER_PUBLIC_IP}. nginx.conf itself is gitignored since it embeds
+# the server's public IP.
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    server {
+        listen 443 ssl;
+        server_name ${SERVER_PUBLIC_IP};
+
+        ssl_certificate     /etc/weathernet/pki/server.cert.pem;
+        ssl_certificate_key /etc/weathernet/pki/server.key.pem;
+
+        # mTLS: verify every client against the internal CA. Using
+        # "optional" (rather than "on") plus the explicit checks below
+        # is what lets us return the distinct 495/496 codes the API
+        # contract promises for "invalid cert" vs. "no cert" -- this is
+        # still plain nginx configuration, no application code involved.
+        ssl_client_certificate /etc/weathernet/pki/ca.cert.pem;
+        ssl_verify_client optional;
+        ssl_verify_depth 1;
+
+        client_max_body_size 64k;
+
+        # The only path probes ever call. Everything else is rejected
+        # below without being proxied anywhere.
+        location /api/v1/ {
+            if ($ssl_client_verify = NONE) {
+                return 496;
+            }
+            if ($ssl_client_verify != SUCCESS) {
+                return 495;
+            }
+
+            proxy_pass http://django:8000;
+            # This is the header telemetry/views.py trusts as the
+            # caller's identity -- it is only trustworthy because it is
+            # set here, after successful client certificate
+            # verification, and Django is unreachable except through
+            # this proxy.
+            proxy_set_header X-Client-Cert-CN $ssl_client_s_dn_cn;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Everything else (Django Admin, its static assets, and any
+        # unmapped path) is proxied straight through without an mTLS
+        # requirement -- Django's own authentication is the trust
+        # boundary for /admin/, and Django's URLconf itself 404s on
+        # anything it doesn't recognize.
+        location / {
+            proxy_pass http://django:8000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            # Defense in depth: never forward a client-supplied value
+            # for the header telemetry/views.py trusts as an identity,
+            # even though this location can't reach that view.
+            proxy_set_header X-Client-Cert-CN "";
+        }
+    }
+}

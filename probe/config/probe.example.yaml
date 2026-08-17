@@ -1,0 +1,37 @@
+# Copied to probe.yaml and filled in by scripts/setup.sh. probe_id must
+# be the exact UUID used as the Common Name of this probe's client
+# certificate (see server/pki/generate-probe-cert.sh) and as the id of
+# its Probe row in Django Admin -- all three must agree.
+
+probe_id: "00000000-0000-0000-0000-000000000000"
+
+# Must match one of probes.models.Probe.HardwareType's values on the
+# server: raspberry_pi_3, raspberry_pi_4, raspberry_pi_5, generic_linux.
+hardware_type: raspberry_pi_3
+
+# The server's ingestion endpoint, e.g. https://203.0.113.10/api/v1/ingest
+server_url: "https://SERVER_PUBLIC_IP/api/v1/ingest"
+
+# mTLS material, copied here out of band (e.g. scp) from the server's
+# pki/generate-probe-cert.sh output -- see the top-level README.
+client_cert_path: /etc/weathernet-probe/certs/client.cert.pem
+client_key_path: /etc/weathernet-probe/certs/client.key.pem
+ca_cert_path: /etc/weathernet-probe/certs/ca.cert.pem
+
+report_interval_seconds: 300
+
+# Names must match entries in weathernet_probe/sensors/registry.py.
+# Only mock sensors exist in v1 -- see PROJECT_SPEC.md Section 12.
+sensors:
+  - mock_temperature
+  - mock_humidity
+  - mock_pressure
+
+# On-disk retry queue for readings that failed to send.
+spool_path: /var/lib/weathernet-probe/spool.jsonl
+# Cap on how much backlog to keep during an outage, in days worth of
+# readings at report_interval_seconds. Oldest entries are dropped
+# beyond this.
+spool_max_days: 14
+
+log_path: /var/log/weathernet-probe/probe.log

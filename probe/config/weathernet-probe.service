@@ -1,0 +1,18 @@
+[Unit]
+Description=WeatherNet probe daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__RUN_USER__
+Group=__RUN_GROUP__
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__VENV_DIR__/bin/python -m weathernet_probe.main --config /etc/weathernet-probe/probe.yaml
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

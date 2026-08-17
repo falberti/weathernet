@@ -1,0 +1,62 @@
+{
+  "id": null,
+  "uid": "weathernet-health",
+  "title": "WeatherNet Health",
+  "tags": ["weathernet"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Probe Registry",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT name, hardware_type, is_active, last_seen_at FROM probes_probe ORDER BY last_seen_at DESC NULLS LAST;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "CPU Temperature per Probe",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "celsius" },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT h.time AS \"time\", p.name AS metric, h.cpu_temp_c AS value FROM telemetry_probehealth h JOIN probes_probe p ON p.id = h.probe_id WHERE $__timeFilter(h.time) ORDER BY 1;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Sensor Readings (placeholder -- populates once a real sensor driver reports data)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT r.time AS \"time\", p.name || ' / ' || r.sensor_type AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    }
+  ]
+}
