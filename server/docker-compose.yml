@@ -41,6 +41,12 @@ services:
       WIREGUARD_LISTEN_PORT: ${WIREGUARD_LISTEN_PORT}
       PUBLIC_SUMMARY_API_KEY: ${PUBLIC_SUMMARY_API_KEY}
       PUBLIC_LOCATION_PRECISION_DECIMALS: ${PUBLIC_LOCATION_PRECISION_DECIMALS}
+      # Telegram daily digest (subscriptions app): only `manage.py
+      # send_daily_digest`, run inside this same container via `docker
+      # compose exec` from a systemd timer, needs these -- the
+      # telegram-bot service below is what actually talks to visitors.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      SUBSCRIPTION_MAX_DISTANCE_KM: ${SUBSCRIPTION_MAX_DISTANCE_KM}
     volumes:
       # Read-only. The CA key is the one meaningful new attack-surface
       # trade-off enrollment introduces -- signing CSRs synchronously
@@ -70,6 +76,36 @@ services:
     # Deliberately not published to the host -- the ingestion path is
     # only reachable through nginx's mTLS-terminating proxy (see
     # PROJECT_SPEC.md Section 3).
+
+  telegram-bot:
+    # Same image as django -- just a different long-running command
+    # (see subscriptions/management/commands/telegram_bot_poll.py).
+    # Its own service (not folded into django's container) because it
+    # needs to run forever independently of gunicorn's request/response
+    # lifecycle, and a crash/restart here shouldn't affect the API.
+    build: ./django_app
+    restart: unless-stopped
+    command: python manage.py telegram_bot_poll
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_DEBUG: ${DJANGO_DEBUG}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      SUBSCRIPTION_MAX_DISTANCE_KM: ${SUBSCRIPTION_MAX_DISTANCE_KM}
+      NOMINATIM_USER_AGENT: ${NOMINATIM_USER_AGENT}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - weathernet
+    # No PKI/SSH bind mounts (unlike django) -- this only ever talks to
+    # Telegram's API and Nominatim outbound, and reads/writes its own
+    # app's tables. Not published to the host -- Telegram is reached by
+    # this container calling out, nothing calls in.
 
   nginx:
     image: nginx:1.27-alpine

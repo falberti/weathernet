@@ -23,6 +23,7 @@ require __DIR__ . '/db.php';
 const HISTORY_WINDOW_HOURS = 24;
 
 $env = load_env(__DIR__ . '/.env');
+$telegramBotUsername = $env['TELEGRAM_BOT_USERNAME'] ?? '';
 
 /**
  * Reads every probe currently in the MySQL cache, shaped exactly like
@@ -165,11 +166,31 @@ const SENSOR_CHART_CONFIG = [
     grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   }
   .chart-card canvas { max-height: 220px; }
+
+  .telegram-cta {
+    max-width: 1000px; margin: 0 auto 2.5rem; background: #229ED9;
+    color: #fff; border-radius: 12px; padding: 1.25rem 1.5rem;
+    text-align: center;
+  }
+  .telegram-cta p { margin: 0 0 0.75rem; }
+  .telegram-cta a {
+    display: inline-block; background: #fff; color: #229ED9;
+    font-weight: 600; text-decoration: none; padding: 0.5rem 1.25rem;
+    border-radius: 999px;
+  }
 </style>
 </head>
 <body>
   <h1>&#9925; WeatherNet</h1>
   <p class="subtitle">Rilevazioni meteo in tempo reale dalle sonde della rete</p>
+
+  <?php if ($telegramBotUsername !== ''): ?>
+    <div class="telegram-cta">
+      <p>Vuoi il riepilogo meteo di ieri ogni mattina su Telegram? Scrivi al bot il nome di una localit&agrave; --
+         se c'&egrave; una sonda abbastanza vicina, sei iscritto.</p>
+      <a href="https://t.me/<?= htmlspecialchars($telegramBotUsername) ?>" target="_blank" rel="noopener">Apri il bot su Telegram</a>
+    </div>
+  <?php endif; ?>
 
   <?php if (empty($probes)): ?>
     <p class="empty">Dati momentaneamente non disponibili. Riprova tra qualche minuto.</p>

@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the WeatherNet Telegram daily digest once a day
+
+[Timer]
+# The VM's system clock is what OnCalendar goes by, not Django's
+# TIME_ZONE setting (Europe/Rome) -- that only affects what
+# "yesterday" means inside the digest itself (see
+# subscriptions/management/commands/send_daily_digest.py). Adjust this
+# if the VM's clock isn't UTC and you want a specific local send time.
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

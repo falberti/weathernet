@@ -211,7 +211,23 @@ sed "s|__SERVER_DIR__|${SERVER_DIR}|g" wireguard/sync-peers.timer | sudo tee /et
 sudo systemctl daemon-reload
 sudo systemctl enable --now weathernet-sync-peers.timer
 
-# --- 12. Summary ---
+# --- 12. Telegram daily digest timer (subscriptions app) ---
+# The bot itself (telegram-bot service) is already running -- it came
+# up with the rest of docker-compose in step 9. This is just the once-
+# a-day digest send, which needs its own timer the same way WireGuard
+# peer-sync does above.
+if [[ -z "${TELEGRAM_BOT_TOKEN:-}" ]]; then
+  log "TELEGRAM_BOT_TOKEN is not set -- skipping the daily digest timer install." \
+      "Set it in .env, restart the telegram-bot service, and re-run this script to install it."
+else
+  log "Installing the Telegram daily digest timer (runs once a day)"
+  sed "s|__SERVER_DIR__|${SERVER_DIR}|g" scripts/weathernet-daily-digest.service | sudo tee /etc/systemd/system/weathernet-daily-digest.service >/dev/null
+  sed "s|__SERVER_DIR__|${SERVER_DIR}|g" scripts/weathernet-daily-digest.timer | sudo tee /etc/systemd/system/weathernet-daily-digest.timer >/dev/null
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now weathernet-daily-digest.timer
+fi
+
+# --- 13. Summary ---
 cat <<SUMMARY
 
 WeatherNet server is up.
@@ -233,6 +249,15 @@ just silently be unable to open a tunnel.
 Server WireGuard public key (Django already hands this to a probe
 automatically during enrollment -- shown here just for reference):
   ${SERVER_WG_PUBLIC_KEY}
+$(if [[ -z "${TELEGRAM_BOT_TOKEN:-}" ]]; then cat <<TELEGRAM
+Telegram daily digest is NOT configured (TELEGRAM_BOT_TOKEN is empty
+in .env). To enable it: message @BotFather on Telegram, send /newbot,
+paste the token it gives you into .env as TELEGRAM_BOT_TOKEN (and the
+bot's @username as TELEGRAM_BOT_USERNAME), then:
+  docker compose up -d telegram-bot
+  ./scripts/setup.sh ${PUBLIC_IP}   # re-run to install the digest timer
+TELEGRAM
+fi)
 
 Next step: add a probe. It's one command on the probe's side:
   1. In Django Admin, add an "Enrollment token" (probe name + hardware

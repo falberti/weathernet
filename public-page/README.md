@@ -49,6 +49,18 @@ leave the VM's `/api/v1/public/*` responses in the first place (see
 the Django views), so there's nothing to accidentally leak here even
 if this page's template changes later.
 
+## Telegram daily digest
+
+A banner at the top of the page (only shown if `TELEGRAM_BOT_USERNAME`
+is set in `.env`) links to `t.me/<username>` -- opening a chat with
+the bot and pressing Start. Everything after that happens entirely
+inside Telegram, not on this page: the bot asks for a place name,
+geocodes it (Nominatim, open, no API key), and subscribes that chat to
+a daily summary if a probe is close enough. See the VM-side
+`server/django_app/subscriptions/` app (`bot.py` for the conversation,
+`management/commands/send_daily_digest.py` for the once-a-day send) --
+none of that logic lives here, this page only carries the link.
+
 ## Layout
 
 - `index.php` -- the page. Reads `probe_cache` via `db.php`, renders
@@ -64,8 +76,10 @@ if this page's template changes later.
 - `env.php` -- a ~15-line dependency-free `.env` parser (`KEY=VALUE`
   per line). Not a secrets file itself, just the loader.
 - `.env` (you create this, gitignored) -- `VM_HOST`/`API_KEY`
-  (`sync.php` only) and `DB_HOST`/`DB_NAME`/`DB_USER`/`DB_PASS` (both
-  scripts).
+  (`sync.php` only), `DB_HOST`/`DB_NAME`/`DB_USER`/`DB_PASS` (both
+  scripts), and `TELEGRAM_BOT_USERNAME` (`index.php` only, just to
+  build the `t.me/` link -- not sensitive, kept here anyway for a
+  single place to change it).
 - `schema.sql` -- the one table this needs. Run it once.
 - `.htaccess` -- blocks direct URL access to `.env`, `*.pem`, and
   `sync.php`. `.env` in particular holds real credentials now (the API
@@ -92,7 +106,9 @@ if this page's template changes later.
    `mysql` CLI if you have shell access).
 
 4. Copy `.env.example` to `.env` and fill in `VM_HOST`, `API_KEY`
-   (from step 1), and the MySQL credentials from step 3.
+   (from step 1), and the MySQL credentials from step 3. If the
+   Telegram bot (see below) is set up, also set `TELEGRAM_BOT_USERNAME`
+   to show the subscribe banner -- leave it blank to hide it.
 
 5. Upload `index.php`, `sync.php`, `db.php`, `env.php`, `.env`,
    `weathernet-ca.pem`, and `.htaccess` (all in the same directory) to
