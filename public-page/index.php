@@ -245,6 +245,8 @@ const SENSOR_CHART_CONFIG = [
   <footer>
     Coordinate approssimate per tutela della privacy &middot; Indice qualit&agrave;
     aria euristico, non certificato
+    <br>
+    <a href="https://github.com/falberti/weathernet" target="_blank" rel="noopener">Il progetto su GitHub</a>
   </footer>
 
 <?php if (!empty($probes)): ?>
