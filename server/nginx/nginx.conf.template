@@ -17,6 +17,14 @@ http {
         "~CN=(?<CN>[^,]+)" $CN;
     }
 
+    # /api/v1/public/summary (below) is meant to be called by one
+    # external page's server-side code, gated by its own API key -- but
+    # unlike every other path here it has no per-request token and is
+    # reachable by anyone who finds the URL, so it gets a rate limit as
+    # a second layer against scraping/abuse. 30r/m with a small burst
+    # comfortably covers legitimate page loads/refreshes.
+    limit_req_zone $binary_remote_addr zone=public_summary:10m rate=30r/m;
+
     server {
         listen 443 ssl;
         server_name ${SERVER_PUBLIC_IP};
@@ -69,6 +77,20 @@ http {
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Public read-only summary for an external page (e.g. a PHP page
+        # on another domain) -- no client cert required (Django itself
+        # gates this on a shared API key, see probes/views.py), just
+        # rate-limited against abuse since the URL is otherwise reachable
+        # by anyone.
+        location = /api/v1/public/summary {
+            limit_req zone=public_summary burst=10 nodelay;
+            proxy_pass http://django:8000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Client-Cert-CN "";
         }
 
         # Everything else -- Django Admin and its static assets,

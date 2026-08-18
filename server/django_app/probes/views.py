@@ -1,14 +1,20 @@
 import hashlib
+import hmac
 import logging
 import uuid
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Max
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from telemetry.models import SensorReading
+
 from . import ca, ssh
+from .aqi import compute_air_quality_index
 from .models import EnrollmentToken, Probe
 from .serializers import EnrollRequestSerializer
 from .wireguard import SubnetExhaustedError, allocate_tunnel_ip, read_server_public_key, server_tunnel_ip
@@ -16,6 +22,8 @@ from .wireguard import SubnetExhaustedError, allocate_tunnel_ip, read_server_pub
 logger = logging.getLogger(__name__)
 
 DEFAULT_REPORT_INTERVAL_SECONDS = 300
+PUBLIC_SUMMARY_SENSOR_TYPES = ("temperature_c", "humidity_pct", "pressure_hpa", "gas_resistance_ohm")
+PUBLIC_SUMMARY_GAS_BASELINE_WINDOW = timedelta(days=7)
 
 
 class EnrollView(APIView):
@@ -119,3 +127,85 @@ class EnrollView(APIView):
             token.save(update_fields=["used_at", "resulting_probe"])
 
         return Response(response_body, status=201)
+
+
+class PublicSummaryView(APIView):
+    """GET /api/v1/public/summary -- for an external, public-facing page
+    (e.g. a PHP page on a different domain) to render current readings.
+    Not protected by mTLS (nginx proxies this path through like
+    /api/v1/enroll); gated instead by a shared API key, since unlike
+    /api/v1/enroll this has no per-request token of its own and would
+    otherwise be wide open to being scraped/hammered directly by
+    anyone who finds the URL.
+
+    Coordinates are deliberately rounded to a coarser precision than
+    what's stored (PUBLIC_LOCATION_PRECISION_DECIMALS) -- enough to
+    place a probe in its general area (and, with multiple probes,
+    eventually plot a geographic heatmap) without revealing which
+    building it's actually in. location_address and owner contact
+    details are never included here at all.
+    """
+
+    def get(self, request):
+        configured_key = settings.PUBLIC_SUMMARY_API_KEY
+        provided_key = request.headers.get("X-Api-Key", "")
+        # An unset configured_key means the endpoint is disabled, not
+        # open -- compare_digest("", "") is True, so the emptiness is
+        # checked separately rather than relying on the digest compare.
+        if not configured_key or not hmac.compare_digest(provided_key, configured_key):
+            return Response({"detail": "invalid or missing API key"}, status=401)
+
+        probes = list(
+            Probe.objects.filter(
+                is_active=True,
+                location_latitude__isnull=False,
+                location_longitude__isnull=False,
+            )
+        )
+
+        latest_readings = {}
+        readings_qs = (
+            SensorReading.objects.filter(probe__in=probes, sensor_type__in=PUBLIC_SUMMARY_SENSOR_TYPES)
+            .order_by("probe_id", "sensor_type", "-time")
+            .distinct("probe_id", "sensor_type")
+        )
+        for reading in readings_qs:
+            latest_readings.setdefault(reading.probe_id, {})[reading.sensor_type] = reading.value
+
+        gas_baselines = dict(
+            SensorReading.objects.filter(
+                probe__in=probes,
+                sensor_type="gas_resistance_ohm",
+                time__gte=timezone.now() - PUBLIC_SUMMARY_GAS_BASELINE_WINDOW,
+            )
+            .values("probe_id")
+            .annotate(baseline=Max("value"))
+            .values_list("probe_id", "baseline")
+        )
+
+        precision = settings.PUBLIC_LOCATION_PRECISION_DECIMALS
+        payload = []
+        for probe in probes:
+            readings = latest_readings.get(probe.id, {})
+            payload.append(
+                {
+                    "name": probe.name,
+                    "hardware_type": probe.hardware_type,
+                    "latitude": round(float(probe.location_latitude), precision),
+                    "longitude": round(float(probe.location_longitude), precision),
+                    "last_seen_at": probe.last_seen_at,
+                    "readings": {
+                        "temperature_c": readings.get("temperature_c"),
+                        "humidity_pct": readings.get("humidity_pct"),
+                        "pressure_hpa": readings.get("pressure_hpa"),
+                        "gas_resistance_ohm": readings.get("gas_resistance_ohm"),
+                        "air_quality_index": compute_air_quality_index(
+                            readings.get("gas_resistance_ohm"),
+                            gas_baselines.get(probe.id),
+                            readings.get("humidity_pct"),
+                        ),
+                    },
+                }
+            )
+
+        return Response({"generated_at": timezone.now(), "probes": payload})

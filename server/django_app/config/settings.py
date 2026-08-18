@@ -171,6 +171,16 @@ SERVER_PUBLIC_IP = os.environ.get("SERVER_PUBLIC_IP", "")
 WIREGUARD_SUBNET = os.environ.get("WIREGUARD_SUBNET", "10.10.0.0/24")
 WIREGUARD_LISTEN_PORT = int(os.environ.get("WIREGUARD_LISTEN_PORT", "51820"))
 
+# --- Public read-only summary endpoint (probes/views.py PublicSummaryView) ---
+# Empty disables the endpoint entirely (every request 401s) -- see
+# .env.example for how scripts/setup.sh generates a real value.
+PUBLIC_SUMMARY_API_KEY = os.environ.get("PUBLIC_SUMMARY_API_KEY", "")
+# Decimal places kept on published probe coordinates -- deliberately
+# coarser than what's stored (Probe.location_latitude/longitude), so
+# the exact property is never exposed publicly. 2 is roughly
+# neighborhood-level precision (~1km).
+PUBLIC_LOCATION_PRECISION_DECIMALS = int(os.environ.get("PUBLIC_LOCATION_PRECISION_DECIMALS", "2"))
+
 # The CA's key and cert, and the server's WireGuard public key, are
 # bind-mounted read-only into this container (see docker-compose.yml)
 # so probes/ca.py can sign CSRs and probes/wireguard.py can hand back

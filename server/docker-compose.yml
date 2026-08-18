@@ -39,6 +39,8 @@ services:
       SERVER_PUBLIC_IP: ${SERVER_PUBLIC_IP}
       WIREGUARD_SUBNET: ${WIREGUARD_SUBNET}
       WIREGUARD_LISTEN_PORT: ${WIREGUARD_LISTEN_PORT}
+      PUBLIC_SUMMARY_API_KEY: ${PUBLIC_SUMMARY_API_KEY}
+      PUBLIC_LOCATION_PRECISION_DECIMALS: ${PUBLIC_LOCATION_PRECISION_DECIMALS}
     volumes:
       # Read-only. The CA key is the one meaningful new attack-surface
       # trade-off enrollment introduces -- signing CSRs synchronously

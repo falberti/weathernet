@@ -10,6 +10,10 @@ server/wireguard/server_public.key
 # Probe virtualenv (created by probe/scripts/setup.sh).
 probe/venv/
 
+# Public page deployment artifacts (per-deployment, not source).
+public-page/weathernet-ca.pem
+public-page/summary-cache.json
+
 # Python
 __pycache__/
 *.py[cod]

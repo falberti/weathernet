@@ -44,6 +44,7 @@ if [[ ! -f .env ]]; then
   POSTGRES_PASSWORD="$(random_password)"
   GRAFANA_DB_PASSWORD="$(random_password)"
   GRAFANA_ADMIN_PASSWORD="$(random_password)"
+  PUBLIC_SUMMARY_API_KEY="$(random_secret)"
 
   sed -e "s|^DJANGO_SECRET_KEY=.*|DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}|" \
       -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|" \
@@ -51,6 +52,7 @@ if [[ ! -f .env ]]; then
       -e "s|^GRAFANA_ADMIN_PASSWORD=.*|GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}|" \
       -e "s|^DJANGO_ALLOWED_HOSTS=.*|DJANGO_ALLOWED_HOSTS=${PUBLIC_IP}|" \
       -e "s|^SERVER_PUBLIC_IP=.*|SERVER_PUBLIC_IP=${PUBLIC_IP}|" \
+      -e "s|^PUBLIC_SUMMARY_API_KEY=.*|PUBLIC_SUMMARY_API_KEY=${PUBLIC_SUMMARY_API_KEY}|" \
       .env > .env.tmp
   mv .env.tmp .env
   log "Generated a fresh Django secret key and random passwords in .env"

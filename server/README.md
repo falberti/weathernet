@@ -40,9 +40,12 @@ and [`PROJECT_SPEC.md`](../PROJECT_SPEC.md) for the full design.
   - `telemetry/` -- the ingestion endpoint and the two TimescaleDB
     hypertable models (`SensorReading`, `ProbeHealth`).
 - `nginx/nginx.conf.template` -- rendered into `nginx.conf` (gitignored)
-  by `scripts/setup.sh`. `/api/v1/ingest` is the only mTLS-gated
-  location; `/api/v1/enroll` and `/admin/` share the rest of the port
-  without requiring a client certificate.
+  by `scripts/setup.sh` -- re-run it (safe/idempotent) after pulling a
+  change to this file, `deploy.sh` alone does not re-render it.
+  `/api/v1/ingest` is the only mTLS-gated location; `/api/v1/enroll`,
+  `/api/v1/public/summary` (rate-limited instead, see
+  `probes/views.py` `PublicSummaryView`), and `/admin/` share the rest
+  of the port without requiring a client certificate.
 - `grafana/provisioning/` -- datasource and one example dashboard,
   loaded automatically on Grafana's first boot.
 - `scripts/setup.sh` / `scripts/deploy.sh` -- see the top-level README.

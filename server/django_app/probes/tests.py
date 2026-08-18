@@ -12,6 +12,9 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from telemetry.models import SensorReading
+
+from .aqi import compute_air_quality_index
 from .models import EnrollmentToken, Probe
 
 
@@ -235,3 +238,126 @@ class EnrollViewRaceConditionTests(EnrollmentTestBase, TransactionTestCase):
         self.assertEqual(results.count(201), 1, results)
         self.assertEqual(results.count(410), 4, results)
         self.assertEqual(Probe.objects.count(), 1)
+
+
+class AirQualityIndexTests(TestCase):
+    def test_clean_air_and_ideal_humidity_scores_near_100(self):
+        self.assertEqual(compute_air_quality_index(100000, 100000, 40), 100)
+
+    def test_missing_input_returns_none(self):
+        self.assertIsNone(compute_air_quality_index(None, 100000, 40))
+        self.assertIsNone(compute_air_quality_index(50000, 100000, None))
+        self.assertIsNone(compute_air_quality_index(50000, 0, 40))
+        self.assertIsNone(compute_air_quality_index(50000, None, 40))
+
+    def test_gas_resistance_above_baseline_is_capped_not_amplified(self):
+        # A reading above the rolling baseline (the baseline can lag a
+        # sudden improvement in air quality) must not push the score
+        # over 100.
+        self.assertEqual(
+            compute_air_quality_index(200000, 100000, 40),
+            compute_air_quality_index(100000, 100000, 40),
+        )
+
+
+@override_settings(PUBLIC_SUMMARY_API_KEY="test-summary-key")
+class PublicSummaryViewTests(TestCase):
+    def _get(self, api_key="test-summary-key"):
+        kwargs = {"headers": {"X-Api-Key": api_key}} if api_key is not None else {}
+        return self.client.get(reverse("public-summary"), **kwargs)
+
+    def _make_probe(self, **kwargs):
+        kwargs.setdefault("name", "garden-station")
+        kwargs.setdefault("hardware_type", Probe.HardwareType.RASPBERRY_PI_3)
+        kwargs.setdefault("location_latitude", "45.464200")
+        kwargs.setdefault("location_longitude", "9.190400")
+        return Probe.objects.create(**kwargs)
+
+    def test_missing_api_key_is_rejected(self):
+        response = self._get(api_key=None)
+        self.assertEqual(response.status_code, 401)
+
+    def test_wrong_api_key_is_rejected(self):
+        response = self._get(api_key="not-the-right-key")
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(PUBLIC_SUMMARY_API_KEY="")
+    def test_unconfigured_key_always_rejects(self):
+        # Even an empty header must not match an empty configured key --
+        # an unset key means the endpoint is disabled, not "open".
+        response = self._get(api_key="")
+        self.assertEqual(response.status_code, 401)
+
+    def test_probe_without_coordinates_is_excluded(self):
+        self._make_probe(location_latitude=None, location_longitude=None)
+        response = self._get()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["probes"], [])
+
+    def test_inactive_probe_is_excluded(self):
+        self._make_probe(is_active=False)
+        response = self._get()
+        self.assertEqual(response.json()["probes"], [])
+
+    def test_coordinates_are_rounded_and_contact_fields_never_included(self):
+        probe = self._make_probe(
+            owner_email="owner@example.com",
+            owner_phone="+39 000 000 0000",
+            location_address="Via Roma 1, Milano",
+        )
+        response = self._get()
+        body = response.json()["probes"][0]
+
+        self.assertEqual(body["latitude"], 45.46)
+        self.assertEqual(body["longitude"], 9.19)
+        for leaked_field in ("owner_email", "owner_phone", "location_address"):
+            self.assertNotIn(leaked_field, body)
+        self.assertNotIn("owner@example.com", response.content.decode())
+
+    @override_settings(PUBLIC_LOCATION_PRECISION_DECIMALS=1)
+    def test_precision_is_configurable(self):
+        self._make_probe()
+        response = self._get()
+        body = response.json()["probes"][0]
+        self.assertEqual(body["latitude"], 45.5)
+        self.assertEqual(body["longitude"], 9.2)
+
+    def test_latest_readings_and_aqi_are_returned(self):
+        probe = self._make_probe()
+        now = timezone.now()
+
+        # An older reading that must be superseded by the newer one below.
+        SensorReading.objects.create(
+            probe=probe, sensor_type="temperature_c", value=10.0, time=now - timedelta(minutes=10)
+        )
+        SensorReading.objects.create(
+            probe=probe, sensor_type="temperature_c", value=22.5, time=now - timedelta(minutes=1)
+        )
+        SensorReading.objects.create(probe=probe, sensor_type="humidity_pct", value=40, time=now)
+        SensorReading.objects.create(probe=probe, sensor_type="gas_resistance_ohm", value=90000, time=now)
+        # 7-day baseline: the max over the window, not the latest value.
+        SensorReading.objects.create(
+            probe=probe, sensor_type="gas_resistance_ohm", value=100000, time=now - timedelta(days=2)
+        )
+
+        response = self._get()
+        readings = response.json()["probes"][0]["readings"]
+
+        self.assertEqual(readings["temperature_c"], 22.5)
+        self.assertEqual(readings["humidity_pct"], 40)
+        self.assertEqual(readings["gas_resistance_ohm"], 90000)
+        self.assertEqual(readings["air_quality_index"], compute_air_quality_index(90000, 100000, 40))
+
+    def test_readings_older_than_seven_days_do_not_count_toward_gas_baseline(self):
+        probe = self._make_probe()
+        now = timezone.now()
+        SensorReading.objects.create(probe=probe, sensor_type="humidity_pct", value=40, time=now)
+        SensorReading.objects.create(probe=probe, sensor_type="gas_resistance_ohm", value=50000, time=now)
+        # Far outside the 7-day baseline window -- must not inflate it.
+        SensorReading.objects.create(
+            probe=probe, sensor_type="gas_resistance_ohm", value=500000, time=now - timedelta(days=30)
+        )
+
+        response = self._get()
+        readings = response.json()["probes"][0]["readings"]
+        self.assertEqual(readings["air_quality_index"], compute_air_quality_index(50000, 50000, 40))

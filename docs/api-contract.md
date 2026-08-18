@@ -1,9 +1,9 @@
 # API Contract
 
-Two endpoints, with different trust models -- see `server/nginx/nginx.conf.template`
+Three endpoints, with different trust models -- see `server/nginx/nginx.conf.template`
 for how nginx handles the difference at the TLS layer (only `/api/v1/ingest`
-requires a client certificate; `/api/v1/enroll` and `/admin/` share the
-same port without one).
+requires a client certificate; `/api/v1/enroll`, `/api/v1/public/summary`,
+and `/admin/` share the same port without one).
 
 Keep this document in sync with `server/django_app/probes/serializers.py`
 / `views.py` and `server/django_app/telemetry/serializers.py` / `views.py`.
@@ -156,3 +156,71 @@ and nginx overwrites any client-supplied value for it.
 - The `Probe` row's `last_seen_at` is set to the current server time and
   `last_health_summary` is replaced with the `health` object from this
   request.
+
+## `GET /api/v1/public/summary`
+
+**Not authenticated by client certificate or by any per-request token
+-- gated by a static, shared API key instead**, since (unlike the two
+endpoints above) it has no natural credential of its own and is meant
+to be called from outside the mTLS trust boundary entirely: by an
+external, public-facing page's server-side code (see `public-page/`),
+not by a probe. Also rate-limited at the nginx layer (`limit_req`,
+`server/nginx/nginx.conf.template`) since the URL itself is otherwise
+reachable by anyone.
+
+### Request headers
+
+```
+X-Api-Key: <PUBLIC_SUMMARY_API_KEY from server/.env>
+```
+
+A missing, wrong, or (when `PUBLIC_SUMMARY_API_KEY` is unset
+server-side) *any* key returns `401` -- an empty configured key means
+the endpoint is disabled, not open to an empty/omitted header.
+
+### Response `200`
+
+```json
+{
+  "generated_at": "2026-08-18T09:00:00Z",
+  "probes": [
+    {
+      "name": "weather-000",
+      "hardware_type": "raspberry_pi_3",
+      "latitude": 45.46,
+      "longitude": 9.19,
+      "last_seen_at": "2026-08-18T08:55:12Z",
+      "readings": {
+        "temperature_c": 24.3,
+        "humidity_pct": 51.2,
+        "pressure_hpa": 1012.4,
+        "gas_resistance_ohm": 82345.0,
+        "air_quality_index": 78
+      }
+    }
+  ]
+}
+```
+
+Only `Probe` rows with `is_active = true` and both coordinate fields
+set are included. `latitude`/`longitude` are rounded to
+`PUBLIC_LOCATION_PRECISION_DECIMALS` (2 by default, ~1km) -- coarser
+than what's actually stored in `Probe.location_latitude`/
+`location_longitude`, so the exact property is never exposed. Any
+`readings.*` value is `null` if that sensor type has never reported
+for this probe. `air_quality_index` is the same heuristic 0-100 score
+as the Grafana "Air Quality Index (heuristic)" panel (see
+`probes/aqi.py` -- NOT an official/certified AQI), `null` if there's
+no gas resistance and/or humidity reading yet.
+
+**Never included, by design**: `location_address`, `owner_email`,
+`owner_phone`. These exist in the `Probe` model for internal/admin use
+only and must never be added to this response.
+
+### Responses
+
+| Status | Meaning                                    | Body |
+|--------|---------------------------------------------|------|
+| `200`  | See above (`probes` may be an empty list).  | as above |
+| `401`  | Missing/wrong `X-Api-Key`, or the endpoint is disabled (`PUBLIC_SUMMARY_API_KEY` unset). | `{"detail": "..."}` |
+| `429`  | Rate limit exceeded (nginx, not Django).    | nginx's default plain-text response |
