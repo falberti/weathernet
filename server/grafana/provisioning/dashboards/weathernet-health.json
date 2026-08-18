@@ -5,7 +5,7 @@
   "tags": ["weathernet"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "refresh": "1m",
   "time": { "from": "now-24h", "to": "now" },
   "panels": [
@@ -85,7 +85,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Pressure",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
       "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
       "fieldConfig": {
         "defaults": { "unit": "pressurehpa" },
@@ -104,7 +104,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Gas Resistance (uncalibrated -- higher is generally cleaner air)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
       "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
       "fieldConfig": {
         "defaults": { "unit": "ohm" },
@@ -115,6 +115,38 @@
           "refId": "A",
           "format": "time_series",
           "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'gas_resistance_ohm' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "gauge",
+      "title": "Air Quality Index (heuristic)",
+      "description": "NOT an official/certified AQI -- a real calibrated IAQ requires Bosch's proprietary BSEC library, out of scope here (see probe/weathernet_probe/sensors/bme680.py). This is a relative indicator only: 75% weight on the latest gas resistance vs. its 7-day rolling maximum (higher resistance = cleaner air), 25% weight on humidity comfort (best near 40%). 100 = best observed conditions recently, not an absolute standard.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 40 },
+              { "color": "green", "value": 70 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "WITH latest_gas AS (\n  SELECT r.value AS gas_resistance\n  FROM telemetry_sensorreading r\n  WHERE r.sensor_type = 'gas_resistance_ohm'\n  ORDER BY r.time DESC LIMIT 1\n),\nbaseline_gas AS (\n  SELECT max(r.value) AS gas_baseline\n  FROM telemetry_sensorreading r\n  WHERE r.sensor_type = 'gas_resistance_ohm' AND r.time > now() - interval '7 days'\n),\nlatest_hum AS (\n  SELECT r.value AS humidity\n  FROM telemetry_sensorreading r\n  WHERE r.sensor_type = 'humidity_pct'\n  ORDER BY r.time DESC LIMIT 1\n)\nSELECT round(\n  0.75 * least(100, 100.0 * latest_gas.gas_resistance / nullif(baseline_gas.gas_baseline, 0))\n  + 0.25 * (100 - least(100, abs(latest_hum.humidity - 40) * 2.5))\n) AS \"Air Quality Index\"\nFROM latest_gas, baseline_gas, latest_hum;",
           "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
         }
       ]
