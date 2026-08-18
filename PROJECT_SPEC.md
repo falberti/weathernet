@@ -147,6 +147,26 @@ explicitly checks `$ssl_client_verify` and rejects there if it isn't
 `optional_no_ca` is the correct directive here and `optional`/`on` are not,
 and Section 7 for how the two endpoints differ.
 
+**A fourth path: a public, read-only summary for an external page.**
+Unlike the three paths above, this one is meant to be consumed from
+*outside* the mTLS/admin trust boundary entirely — by the server-side
+code of a page hosted on a completely different domain (e.g. a
+PHP-only host), so that visitors never connect to the VM directly and
+never see its self-signed certificate (Section 12 notes why the VM
+itself has no browser-trusted cert in v1). `GET
+/api/v1/public/summary` shares nginx's port with `/api/v1/enroll` and
+`/admin/` — no client certificate required — but since it has no
+per-request credential of its own (a probe's enrollment token, an
+admin's session), it is gated instead by a static, shared API key
+(`PUBLIC_SUMMARY_API_KEY`, checked in the view) and rate-limited at the
+nginx layer, since the URL is otherwise reachable by anyone who finds
+it. It deliberately returns coordinates rounded to a coarser precision
+than what's stored (`PUBLIC_LOCATION_PRECISION_DECIMALS`) and never
+includes `location_address` or owner contact fields — see Section 7.3.
+The reference external page lives in `public-page/` at the repo root
+(not part of the server or probe components — it does not run on the
+VM at all).
+
 ## 4. Repository Layout
 
 ```
@@ -169,10 +189,11 @@ weathernet/
 │   │   ├── probes/                 # app: registry + enrollment
 │   │   │   ├── models.py            # Probe, EnrollmentToken
 │   │   │   ├── admin.py             # includes the "generate token" flow
-│   │   │   ├── views.py             # POST /api/v1/enroll
+│   │   │   ├── views.py             # POST /api/v1/enroll, GET /api/v1/public/summary
 │   │   │   ├── serializers.py
 │   │   │   ├── ca.py                # CSR signing helpers (uses `cryptography`)
 │   │   │   ├── wireguard.py         # tunnel IP allocation + peer rendering
+│   │   │   ├── aqi.py               # heuristic air quality score (shared with the Grafana panel's formula)
 │   │   │   ├── management/
 │   │   │   │   └── commands/
 │   │   │   │       └── generate_wireguard_peers.py
@@ -219,6 +240,9 @@ weathernet/
 │   │   └── deploy.sh
 │   └── tests/
 │       └── ...
+├── public-page/                      # NOT part of server/ or probe/, doesn't run on the VM --
+│   ├── index.php                     # reference PHP client of GET /api/v1/public/summary (see 7.3)
+│   └── README.md
 └── docs/
     └── api-contract.md              # formal request/response schema
 ```
@@ -279,6 +303,14 @@ weathernet/
   variable for just the CN of the client certificate's subject; extract
   it from `$ssl_client_s_dn` with a regex `map` block. On success, forward
   the verified CN in a header (e.g. `X-Client-Cert-CN`) to `django`.
+
+  `GET /api/v1/public/summary` (Section 7.3) also gets its own exact-match
+  location block, unauthenticated like `/api/v1/enroll` (Django's own API
+  key check is the trust boundary there, not nginx) but additionally
+  behind an nginx `limit_req_zone` — unlike every other unauthenticated
+  path here, it has no per-request credential of its own and is reachable
+  by anyone who finds the URL, so the rate limit is a real second layer,
+  not just defense-in-depth theater.
 
 All services on one Docker network, defined in `docker-compose.yml`. Use
 named volumes for `postgres` and `grafana` data so `docker compose down`
@@ -541,7 +573,13 @@ commands — see 5.7), `SERVER_SSH_PUBLIC_KEY_HOST_PATH` (default
 `/home/ubuntu/.ssh/id_ed25519.pub` — the VM's own SSH public key, bind-
 mounted read-only into `django` and handed to every probe during
 enrollment so the server can SSH into it without a manual step; see 5.7),
-and Grafana admin user/password. `.env` itself must be gitignored.
+Grafana admin user/password, `PUBLIC_SUMMARY_API_KEY` (generated fresh in
+`setup.sh` like the Django secret key; empty disables `GET
+/api/v1/public/summary` entirely rather than leaving it open — see 7.3),
+and `PUBLIC_LOCATION_PRECISION_DECIMALS` (default `2`, roughly
+neighborhood-level precision — how coarsely that endpoint rounds
+probe coordinates before publishing them). `.env` itself must be
+gitignored.
 
 The server's own WireGuard keypair is **not** an env var — like the mTLS
 CA, it's a generated file (`wireguard/server_private.key`,
@@ -960,7 +998,7 @@ does at the OS level (no new code under `weathernet_probe/`, just
 ## 7. API Contract
 
 Document this formally in `docs/api-contract.md` as well as implementing
-it; keep the two in sync. Two endpoints, with different trust models —
+it; keep the two in sync. Three endpoints, with different trust models —
 see Section 5.1 for how nginx handles the difference at the TLS layer.
 
 ### 7.1 `POST /api/v1/enroll` — one-time, unauthenticated by cert
@@ -1047,6 +1085,63 @@ identity even if it somehow had a valid cert).
 
 Responses: `201` empty body on success; `400` malformed payload; `403`
 CN/body mismatch or inactive probe; `404` unknown probe.
+
+### 7.3 `GET /api/v1/public/summary` — unauthenticated by cert, gated by a shared API key
+
+For an external, public-facing page's server-side code (Section 3's
+"fourth path"), not for probes. Request header:
+```
+X-Api-Key: <PUBLIC_SUMMARY_API_KEY>
+```
+A missing, wrong, or — when `PUBLIC_SUMMARY_API_KEY` is unset
+server-side — *any* key returns `401`; an unset key means the endpoint
+is disabled, not open to an empty/omitted header.
+
+Response `200`:
+```json
+{
+  "generated_at": "2026-08-18T09:00:00Z",
+  "probes": [
+    {
+      "name": "weather-000",
+      "hardware_type": "raspberry_pi_3",
+      "latitude": 45.46,
+      "longitude": 9.19,
+      "last_seen_at": "2026-08-18T08:55:12Z",
+      "readings": {
+        "temperature_c": 24.3,
+        "humidity_pct": 51.2,
+        "pressure_hpa": 1012.4,
+        "gas_resistance_ohm": 82345.0,
+        "air_quality_index": 78
+      }
+    }
+  ]
+}
+```
+
+Only `Probe` rows with `is_active = true` and both coordinate fields set
+are included. `latitude`/`longitude` are rounded to
+`PUBLIC_LOCATION_PRECISION_DECIMALS` — coarser than what's actually
+stored, so the exact property is never exposed publicly, while still
+placing a probe in its general area (and, with more than one probe,
+supporting a future geographic heatmap without an API change — the
+response shape is already a list per probe for exactly that reason,
+even though v1 ships with one probe). `air_quality_index` is a
+heuristic 0–100 score (`probes/aqi.py`): 75% weight on the latest gas
+resistance relative to its 7-day rolling maximum, 25% weight on
+humidity comfort (best near 40%) — **not an official/certified AQI**,
+a real calibrated IAQ needs Bosch's proprietary BSEC library, out of
+scope (see Section 12 and `probe/weathernet_probe/sensors/bme680.py`).
+`null` for any reading/score not yet available for a probe.
+
+**Never included, by design, however the response shape evolves**:
+`location_address`, `owner_email`, `owner_phone`. These exist on
+`Probe` for internal/admin use only.
+
+Responses: `200` as above (`probes` may be an empty list); `401`
+missing/wrong key or endpoint disabled; `429` rate limit exceeded
+(nginx, not Django — Section 5.1).
 
 ## 8. Setup Scripts
 
@@ -1333,7 +1428,19 @@ mistakes an intentional cut for an oversight:
   over plain HTTP or a self-signed cert for now — treat the server as
   trusted-network-only from an admin-access standpoint until a domain
   exists. Note this plainly in the README so it isn't mistaken for
-  negligence later.
+  negligence later. `public-page/` (Section 7.3) works around this
+  narrowly for *public read access to telemetry* specifically — an
+  external page on a domain with its own real certificate calls the VM
+  server-side, so visitors never touch the VM's self-signed cert — but
+  this does not extend to Admin or Grafana themselves, which remain
+  trusted-network-only as above.
+- **Multi-probe geographic heatmap.** `GET /api/v1/public/summary`
+  (Section 7.3) already returns a list of probes with coordinates,
+  specifically so this doesn't require an API change later, but v1
+  ships with a single probe and no map UI — `public-page/` renders a
+  card per probe, not a map. A real heatmap (e.g. via Leaflet.js reading
+  the same endpoint) is future work once there's more than one probe to
+  plot.
 - **High availability / scaling.** Single server VM, single
   Postgres/TimescaleDB instance handling both relational and time-series
   data. No clustering, no failover, no read replicas.
