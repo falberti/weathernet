@@ -1,0 +1,18 @@
+# .env holds the API key and MySQL credentials -- this one actually is
+# a secret, block it outright. The CA cert isn't secret (it's the same
+# file handed to every probe during enrollment) but there's no reason
+# to leave it directly fetchable by URL either.
+<Files ".env">
+    Require all denied
+</Files>
+
+<FilesMatch "\.pem$">
+    Require all denied
+</FilesMatch>
+
+# sync.php already refuses to run outside a CLI (cron) context on its
+# own (see its PHP_SAPI check), but there's no reason to let a browser
+# reach it at all -- belt and suspenders.
+<Files "sync.php">
+    Require all denied
+</Files>

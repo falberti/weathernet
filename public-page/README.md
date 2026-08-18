@@ -1,34 +1,75 @@
 # WeatherNet public page
 
-A single self-contained PHP page for external, PHP-only hosting (e.g.
-falberti.it) that shows current readings publicly. It does **not**
-run on the WeatherNet VM -- it's a separate, small server-side client
-of the VM's `/api/v1/public/summary` endpoint (see
-[`probes/views.py`](../server/django_app/probes/views.py)
-`PublicSummaryView` and
-[`docs/api-contract.md`](../docs/api-contract.md)).
+A self-contained PHP page for external, PHP-only hosting (e.g.
+falberti.it) that shows current readings, a map, and recent trend
+charts publicly. It does **not** run on the WeatherNet VM.
 
-Why this instead of exposing Grafana or moving ports around: the VM's
-own TLS certificate is signed by this project's private CA (needed for
-probe mTLS), so it's not publicly trusted -- any browser landing on the
-VM directly would show a certificate warning. This page's *own*
-domain has its own regularly-issued certificate, so visitors never see
-the VM at all; the one connection to the VM (server-side, PHP to
-Django) is verified against the private CA explicitly, not left
-unverified.
+## Architecture
+
+Two scripts with very different jobs:
+
+- **`sync.php`** -- run every 10 minutes by your hosting's cron. The
+  only thing here that ever talks to the VM: fetches
+  `/api/v1/public/summary` and `/api/v1/public/history` (see
+  [`probes/views.py`](../server/django_app/probes/views.py)
+  `PublicSummaryView` / `PublicHistoryView` and
+  [`docs/api-contract.md`](../docs/api-contract.md)) and upserts the
+  result into a local MySQL table, `probe_cache` (`schema.sql`).
+- **`index.php`** -- what visitors see. Reads only from that MySQL
+  table, never from the VM. A burst of visitors here never becomes a
+  burst of requests against the VM -- the cron interval is the only
+  thing that talks to it, at a fixed, predictable rate.
+
+This also solves the certificate problem cleanly: the VM's own TLS
+certificate is signed by this project's private CA (needed for probe
+mTLS), so it's not publicly trusted -- a browser landing on the VM
+directly would show a warning. Only `sync.php` (server-side, PHP to
+Django, verified against the private CA explicitly -- see below) ever
+makes that connection; visitors only ever see this page's own
+(regularly issued) certificate.
+
+`probe_cache` holds one row per probe, overwritten on every `sync.php`
+run -- it's a cache of the latest fetch, not an accumulating history.
+A real local history (e.g. one row per reading per run, kept instead
+of overwritten) is a natural extension once that's actually wanted;
+not built now on purpose, per **`in futuro potremo avere uno storico
+dei dati sul MySQL, ma per ora teniamo solo il dato più fresco`**.
 
 ## What's published, and what isn't
 
 Per probe: name, hardware type, latest temperature/humidity/pressure/
-gas-resistance readings, the heuristic air quality score, and
-**coordinates rounded to `PUBLIC_LOCATION_PRECISION_DECIMALS`**
-(2 by default, ~1km precision) -- enough to place a probe in its
-general area without revealing which building it's in.
+gas-resistance readings, the heuristic air quality score, a 24h trend
+per reading, and **coordinates rounded to
+`PUBLIC_LOCATION_PRECISION_DECIMALS`** (2 by default, ~1km precision,
+set server-side) -- enough to place a probe in its general area (and
+plot it on the map) without revealing which building it's in.
 
 Never published: exact address, owner email, owner phone. Those never
-leave the `/api/v1/public/summary` response in the first place (see
-the view), so there's nothing to accidentally leak here even if this
-page's template changes later.
+leave the VM's `/api/v1/public/*` responses in the first place (see
+the Django views), so there's nothing to accidentally leak here even
+if this page's template changes later.
+
+## Layout
+
+- `index.php` -- the page. Reads `probe_cache` via `db.php`, renders
+  the current-reading cards, an OpenStreetMap/Leaflet map (marker per
+  probe, colorable by temperature/humidity/pressure/air quality), and
+  a Chart.js line chart per reading type per probe.
+- `sync.php` -- the cron entrypoint. Fetches both VM endpoints and
+  upserts `probe_cache`. Refuses to run outside a CLI context (i.e. a
+  browser hitting its URL directly gets a 403) -- `.htaccess` also
+  blocks it as a second layer.
+- `db.php` -- a few lines wrapping `PDO` construction, shared by both
+  scripts above.
+- `env.php` -- a ~15-line dependency-free `.env` parser (`KEY=VALUE`
+  per line). Not a secrets file itself, just the loader.
+- `.env` (you create this, gitignored) -- `VM_HOST`/`API_KEY`
+  (`sync.php` only) and `DB_HOST`/`DB_NAME`/`DB_USER`/`DB_PASS` (both
+  scripts).
+- `schema.sql` -- the one table this needs. Run it once.
+- `.htaccess` -- blocks direct URL access to `.env`, `*.pem`, and
+  `sync.php`. `.env` in particular holds real credentials now (the API
+  key and the MySQL password), so this one actually matters.
 
 ## Deploy
 
@@ -46,25 +87,60 @@ page's template changes later.
    scp <vm-user>@<vm-ip>:~/weathernet/server/pki/ca/ca.cert.pem ./weathernet-ca.pem
    ```
 
-3. Edit `index.php`'s configuration constants near the top:
-   - `VM_HOST` -- the VM's public IP (or hostname).
-   - `API_KEY` -- the value from step 1.
+3. In your hosting control panel, create a MySQL database and user,
+   then run `schema.sql` against it (phpMyAdmin's "Import" tab, or the
+   `mysql` CLI if you have shell access).
 
-4. Upload `index.php` and `weathernet-ca.pem` (same directory) to your
-   PHP hosting. `summary-cache.json` is created automatically next to
-   them on first request -- make sure the directory is writable by
-   PHP, or the page still works, it just re-fetches every request
-   instead of caching for `CACHE_TTL_SECONDS`.
+4. Copy `.env.example` to `.env` and fill in `VM_HOST`, `API_KEY`
+   (from step 1), and the MySQL credentials from step 3.
 
-5. Open the page. If it shows "Dati momentaneamente non disponibili",
-   check your host's PHP error log -- `fetch_summary()` logs the HTTP
-   status and curl error for every failed attempt (wrong API key,
-   VM unreachable, CA file missing/wrong path, etc.).
+5. Upload `index.php`, `sync.php`, `db.php`, `env.php`, `.env`,
+   `weathernet-ca.pem`, and `.htaccess` (all in the same directory) to
+   your PHP hosting.
 
-## Multi-probe heatmap (later)
+6. Add a cron job for `sync.php`, type **PHP** (not HTTP/HTTPS -- this
+   runs it via the CLI, which is also what makes `sync.php`'s own
+   "refuse to run outside CLI" guard let it through). Command: just
+   `sync.php` (the UI already prefixes `./`). Frequency: manual
+   configuration, `*/10` in **Minuto**, `*` everywhere else -- your
+   panel's manual mode has a 10-minute floor, matching the "every 5 or
+   10 minutes" ask.
 
-The endpoint already returns a `probes` array with `latitude`/
-`longitude`/readings per probe, specifically so that adding more
-probes later doesn't require an API change -- just this page (or a
-follow-up one) plotting more than one card, e.g. with Leaflet.js
-reading the same JSON. Out of scope for now with a single probe.
+7. Trigger it once by hand if your panel allows a manual "run now", or
+   just wait up to 10 minutes, then open the page. If it still shows
+   "Dati momentaneamente non disponibili": check your host's cron
+   execution log or PHP error log for what `sync.php` printed (it logs
+   the HTTP status and curl error on a failed VM fetch, and the MySQL
+   error on a failed connection); or query the VM directly to rule
+   that leg out:
+   ```bash
+   curl -s -H "X-Api-Key: <key>" https://<vm-ip>/api/v1/public/summary \
+     --cacert server/pki/ca/ca.cert.pem
+   ```
+   If that returns data but the page still doesn't, the problem is
+   between `sync.php` and MySQL -- double-check the `DB_*` values in
+   `.env` and that `schema.sql` was actually run.
+
+## The map
+
+Leaflet.js + OpenStreetMap tiles, loaded from their public CDNs (no
+API key needed, unlike Google Maps). One marker per probe today; the
+radio controls above the map recolor markers by whichever parameter is
+selected, using the same data already on the page -- no extra request.
+With a single probe this is a colored point, not a heatmap; the
+multi-probe case (Section 12 of `PROJECT_SPEC.md`) reads from this
+exact same per-probe coordinate/reading data, so a real interpolated
+heatmap (e.g. the `leaflet.heat` plugin) can be added later without
+changing what's fetched, just how it's drawn.
+
+## The charts
+
+Chart.js, also from its public CDN. One line chart per reading type
+(temperature/humidity/pressure/gas resistance) per probe, over the
+last `HISTORY_WINDOW_HOURS` (24 by default, change the constant near
+the top of `index.php` -- and the matching one in `sync.php`, they're
+independent constants on purpose since one controls what's fetched and
+the other just what's displayed). No air quality index chart -- it's a
+score relative to a baseline computed as of *now* (see `probes/aqi.py`
+on the VM), so there isn't a meaningful historical value to plot for
+it without a lot more query complexity server-side.

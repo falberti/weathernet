@@ -24,6 +24,37 @@ logger = logging.getLogger(__name__)
 DEFAULT_REPORT_INTERVAL_SECONDS = 300
 PUBLIC_SUMMARY_SENSOR_TYPES = ("temperature_c", "humidity_pct", "pressure_hpa", "gas_resistance_ohm")
 PUBLIC_SUMMARY_GAS_BASELINE_WINDOW = timedelta(days=7)
+PUBLIC_HISTORY_DEFAULT_HOURS = 24
+PUBLIC_HISTORY_MAX_HOURS = 168  # 7 days -- a public, keyed-but-not-per-request-limited
+# endpoint shouldn't let a caller ask for an unbounded history query.
+
+
+def _check_public_api_key(request):
+    """Shared gate for every /api/v1/public/* view. Returns an error
+    Response if the request should be rejected, None if it may proceed.
+
+    An unset PUBLIC_SUMMARY_API_KEY means the whole public API surface
+    is disabled, not open -- compare_digest("", "") is True, so the
+    emptiness is checked separately rather than relying on the digest
+    compare alone.
+    """
+    configured_key = settings.PUBLIC_SUMMARY_API_KEY
+    provided_key = request.headers.get("X-Api-Key", "")
+    if not configured_key or not hmac.compare_digest(provided_key, configured_key):
+        return Response({"detail": "invalid or missing API key"}, status=401)
+    return None
+
+
+def _public_probes_queryset():
+    """Probes eligible to appear anywhere in the public API: active,
+    and with coordinates set (an operator hasn't necessarily filled
+    those in for every probe -- see Probe.location_latitude/longitude).
+    """
+    return Probe.objects.filter(
+        is_active=True,
+        location_latitude__isnull=False,
+        location_longitude__isnull=False,
+    )
 
 
 class EnrollView(APIView):
@@ -147,21 +178,11 @@ class PublicSummaryView(APIView):
     """
 
     def get(self, request):
-        configured_key = settings.PUBLIC_SUMMARY_API_KEY
-        provided_key = request.headers.get("X-Api-Key", "")
-        # An unset configured_key means the endpoint is disabled, not
-        # open -- compare_digest("", "") is True, so the emptiness is
-        # checked separately rather than relying on the digest compare.
-        if not configured_key or not hmac.compare_digest(provided_key, configured_key):
-            return Response({"detail": "invalid or missing API key"}, status=401)
+        error = _check_public_api_key(request)
+        if error:
+            return error
 
-        probes = list(
-            Probe.objects.filter(
-                is_active=True,
-                location_latitude__isnull=False,
-                location_longitude__isnull=False,
-            )
-        )
+        probes = list(_public_probes_queryset())
 
         latest_readings = {}
         readings_qs = (
@@ -209,3 +230,62 @@ class PublicSummaryView(APIView):
             )
 
         return Response({"generated_at": timezone.now(), "probes": payload})
+
+
+class PublicHistoryView(APIView):
+    """GET /api/v1/public/history?hours=24 -- recent readings per probe,
+    for the external public page to chart (Section 3's "fourth path",
+    same trust model and gate as PublicSummaryView above).
+
+    Deliberately a separate endpoint from /api/v1/public/summary rather
+    than folding history into it: most requests only need the current
+    values (rendered on every page load), while history is heavier and
+    only needed for charts -- keeping them separate means a page that
+    only wants the cards doesn't pay for a history query it isn't
+    using, and vice versa.
+
+    No AQI in the response: the heuristic score is relative to a
+    trailing baseline computed as of "now" (see aqi.py) -- computing a
+    historically-accurate baseline for every past point would need a
+    rolling-max-as-of-each-timestamp query, real added complexity for
+    a chart that's mainly about the raw sensor trends anyway.
+    """
+
+    def get(self, request):
+        error = _check_public_api_key(request)
+        if error:
+            return error
+
+        try:
+            hours = int(request.query_params.get("hours", PUBLIC_HISTORY_DEFAULT_HOURS))
+        except ValueError:
+            hours = PUBLIC_HISTORY_DEFAULT_HOURS
+        hours = max(1, min(hours, PUBLIC_HISTORY_MAX_HOURS))
+
+        probes = list(_public_probes_queryset())
+
+        series_by_probe = {}
+        readings = (
+            SensorReading.objects.filter(
+                probe__in=probes,
+                sensor_type__in=PUBLIC_SUMMARY_SENSOR_TYPES,
+                time__gte=timezone.now() - timedelta(hours=hours),
+            )
+            .order_by("time")
+            .values("probe_id", "sensor_type", "time", "value")
+        )
+        for reading in readings:
+            probe_series = series_by_probe.setdefault(reading["probe_id"], {t: [] for t in PUBLIC_SUMMARY_SENSOR_TYPES})
+            probe_series[reading["sensor_type"]].append({"time": reading["time"], "value": reading["value"]})
+
+        payload = [
+            {
+                "name": probe.name,
+                "series": series_by_probe.get(
+                    probe.id, {sensor_type: [] for sensor_type in PUBLIC_SUMMARY_SENSOR_TYPES}
+                ),
+            }
+            for probe in probes
+        ]
+
+        return Response({"generated_at": timezone.now(), "window_hours": hours, "probes": payload})

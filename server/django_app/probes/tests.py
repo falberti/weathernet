@@ -16,6 +16,7 @@ from telemetry.models import SensorReading
 
 from .aqi import compute_air_quality_index
 from .models import EnrollmentToken, Probe
+from .views import PUBLIC_SUMMARY_SENSOR_TYPES
 
 
 def _generate_csr_pem(common_name="ignored-by-server"):
@@ -260,11 +261,10 @@ class AirQualityIndexTests(TestCase):
         )
 
 
-@override_settings(PUBLIC_SUMMARY_API_KEY="test-summary-key")
-class PublicSummaryViewTests(TestCase):
-    def _get(self, api_key="test-summary-key"):
-        kwargs = {"headers": {"X-Api-Key": api_key}} if api_key is not None else {}
-        return self.client.get(reverse("public-summary"), **kwargs)
+class PublicApiTestBase:
+    """Shared fixture for the /api/v1/public/* views: same API key
+    setting, same notion of an eligible probe.
+    """
 
     def _make_probe(self, **kwargs):
         kwargs.setdefault("name", "garden-station")
@@ -272,6 +272,13 @@ class PublicSummaryViewTests(TestCase):
         kwargs.setdefault("location_latitude", "45.464200")
         kwargs.setdefault("location_longitude", "9.190400")
         return Probe.objects.create(**kwargs)
+
+
+@override_settings(PUBLIC_SUMMARY_API_KEY="test-summary-key")
+class PublicSummaryViewTests(PublicApiTestBase, TestCase):
+    def _get(self, api_key="test-summary-key"):
+        kwargs = {"headers": {"X-Api-Key": api_key}} if api_key is not None else {}
+        return self.client.get(reverse("public-summary"), **kwargs)
 
     def test_missing_api_key_is_rejected(self):
         response = self._get(api_key=None)
@@ -361,3 +368,60 @@ class PublicSummaryViewTests(TestCase):
         response = self._get()
         readings = response.json()["probes"][0]["readings"]
         self.assertEqual(readings["air_quality_index"], compute_air_quality_index(50000, 50000, 40))
+
+
+@override_settings(PUBLIC_SUMMARY_API_KEY="test-summary-key")
+class PublicHistoryViewTests(PublicApiTestBase, TestCase):
+    def _get(self, api_key="test-summary-key", **query):
+        kwargs = {"headers": {"X-Api-Key": api_key}} if api_key is not None else {}
+        url = reverse("public-history")
+        if query:
+            url += "?" + "&".join(f"{k}={v}" for k, v in query.items())
+        return self.client.get(url, **kwargs)
+
+    def test_missing_api_key_is_rejected(self):
+        response = self._get(api_key=None)
+        self.assertEqual(response.status_code, 401)
+
+    def test_probe_without_coordinates_is_excluded(self):
+        self._make_probe(location_latitude=None, location_longitude=None)
+        response = self._get()
+        self.assertEqual(response.json()["probes"], [])
+
+    def test_returns_series_within_window_ordered_by_time(self):
+        probe = self._make_probe()
+        now = timezone.now()
+        SensorReading.objects.create(probe=probe, sensor_type="temperature_c", value=20.0, time=now - timedelta(hours=2))
+        SensorReading.objects.create(probe=probe, sensor_type="temperature_c", value=21.0, time=now - timedelta(hours=1))
+        # Outside the default 24h window.
+        SensorReading.objects.create(probe=probe, sensor_type="temperature_c", value=99.0, time=now - timedelta(hours=48))
+
+        response = self._get()
+        body = response.json()["probes"][0]
+        temps = [point["value"] for point in body["series"]["temperature_c"]]
+        self.assertEqual(temps, [20.0, 21.0])
+
+    def test_every_configured_sensor_type_present_even_when_empty(self):
+        self._make_probe()
+        response = self._get()
+        series = response.json()["probes"][0]["series"]
+        self.assertEqual(set(series.keys()), set(PUBLIC_SUMMARY_SENSOR_TYPES))
+        self.assertEqual(series["gas_resistance_ohm"], [])
+
+    def test_hours_param_narrows_the_window(self):
+        probe = self._make_probe()
+        now = timezone.now()
+        SensorReading.objects.create(probe=probe, sensor_type="temperature_c", value=20.0, time=now - timedelta(hours=5))
+
+        response = self._get(hours=1)
+        self.assertEqual(response.json()["probes"][0]["series"]["temperature_c"], [])
+        self.assertEqual(response.json()["window_hours"], 1)
+
+    def test_hours_param_is_capped(self):
+        response = self._get(hours=99999)
+        self.assertEqual(response.json()["window_hours"], 168)
+
+    def test_invalid_hours_param_falls_back_to_default(self):
+        response = self._get(hours="not-a-number")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["window_hours"], 24)

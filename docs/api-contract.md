@@ -224,3 +224,55 @@ only and must never be added to this response.
 | `200`  | See above (`probes` may be an empty list).  | as above |
 | `401`  | Missing/wrong `X-Api-Key`, or the endpoint is disabled (`PUBLIC_SUMMARY_API_KEY` unset). | `{"detail": "..."}` |
 | `429`  | Rate limit exceeded (nginx, not Django).    | nginx's default plain-text response |
+
+## `GET /api/v1/public/history`
+
+Same trust model as `/api/v1/public/summary` above (same `X-Api-Key`
+header, same rate limit) -- for the external public page to render
+charts. A separate endpoint rather than folded into `summary`: most
+requests only need current values, so a page that just shows the cards
+doesn't pay for a history query it isn't using.
+
+### Query parameters
+
+| Param   | Type    | Notes |
+|---------|---------|-------|
+| `hours` | integer, optional | How far back to return readings. Default `24`, clamped to `[1, 168]` (7 days). An unparseable value falls back to the default rather than erroring. |
+
+### Response `200`
+
+```json
+{
+  "generated_at": "2026-08-18T09:00:00Z",
+  "window_hours": 24,
+  "probes": [
+    {
+      "name": "weather-000",
+      "series": {
+        "temperature_c": [{"time": "2026-08-18T08:00:00Z", "value": 23.1}],
+        "humidity_pct": [],
+        "pressure_hpa": [],
+        "gas_resistance_ohm": []
+      }
+    }
+  ]
+}
+```
+
+Same probe eligibility as `/api/v1/public/summary` (`is_active = true`,
+both coordinates set). Every key in `PUBLIC_SUMMARY_SENSOR_TYPES`
+(`probes/views.py`) is always present in `series`, as an empty list if
+that probe has no readings of that type in the window -- callers don't
+need to guess which keys might be missing. Points are ordered oldest
+to newest. No `air_quality_index` here: it's relative to a baseline
+computed as of "now" (see `probes/aqi.py`); a historically-accurate
+score for every past point would need a rolling-max-as-of-each-timestamp
+query, not worth it for what's fundamentally a raw-sensor-trend chart.
+
+### Responses
+
+| Status | Meaning                                    | Body |
+|--------|---------------------------------------------|------|
+| `200`  | See above (`probes` may be an empty list).  | as above |
+| `401`  | Missing/wrong `X-Api-Key`, or the endpoint is disabled. | `{"detail": "..."}` |
+| `429`  | Rate limit exceeded (nginx, not Django).    | nginx's default plain-text response |

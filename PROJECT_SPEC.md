@@ -147,25 +147,40 @@ explicitly checks `$ssl_client_verify` and rejects there if it isn't
 `optional_no_ca` is the correct directive here and `optional`/`on` are not,
 and Section 7 for how the two endpoints differ.
 
-**A fourth path: a public, read-only summary for an external page.**
+**A fourth path: a public, read-only API for an external page.**
 Unlike the three paths above, this one is meant to be consumed from
 *outside* the mTLS/admin trust boundary entirely — by the server-side
 code of a page hosted on a completely different domain (e.g. a
 PHP-only host), so that visitors never connect to the VM directly and
 never see its self-signed certificate (Section 12 notes why the VM
-itself has no browser-trusted cert in v1). `GET
-/api/v1/public/summary` shares nginx's port with `/api/v1/enroll` and
-`/admin/` — no client certificate required — but since it has no
-per-request credential of its own (a probe's enrollment token, an
-admin's session), it is gated instead by a static, shared API key
-(`PUBLIC_SUMMARY_API_KEY`, checked in the view) and rate-limited at the
-nginx layer, since the URL is otherwise reachable by anyone who finds
-it. It deliberately returns coordinates rounded to a coarser precision
-than what's stored (`PUBLIC_LOCATION_PRECISION_DECIMALS`) and never
-includes `location_address` or owner contact fields — see Section 7.3.
+itself has no browser-trusted cert in v1). `GET /api/v1/public/summary`
+(current readings) and `GET /api/v1/public/history` (recent per-probe
+time series, for charts) share nginx's port with `/api/v1/enroll` and
+`/admin/` under a `/api/v1/public/` prefix location — no client
+certificate required — but since neither has a per-request credential
+of its own (a probe's enrollment token, an admin's session), both are
+gated by the same static, shared API key (`PUBLIC_SUMMARY_API_KEY`,
+checked in each view) and rate-limited at the nginx layer, since the
+URL is otherwise reachable by anyone who finds it. `summary` returns
+coordinates rounded to a coarser precision than what's stored
+(`PUBLIC_LOCATION_PRECISION_DECIMALS`) and neither endpoint ever
+includes `location_address` or owner contact fields — see Section 7.3/7.4.
+
 The reference external page lives in `public-page/` at the repo root
 (not part of the server or probe components — it does not run on the
-VM at all).
+VM at all, and is the only thing in this repo written in PHP rather
+than Python). It does not call the VM directly: `public-page/sync.php`,
+triggered by the *external host's* own cron (not this project's
+`server`/`probe` components) every 10 minutes, is the only thing that
+calls `/api/v1/public/summary` and `/api/v1/public/history` — it
+upserts the result into a small MySQL table on that same external
+host. `public-page/index.php`, what visitors actually load, reads only
+from that MySQL table. This decouples visitor traffic from VM load
+entirely: however many people load the page in a burst, the VM only
+ever sees one request pair per cron interval, at a fixed and
+predictable rate — the nginx rate limit above is a backstop, not the
+thing actually controlling load in the common case. See
+`public-page/README.md` for the full design and deploy steps.
 
 ## 4. Repository Layout
 
@@ -241,7 +256,12 @@ weathernet/
 │   └── tests/
 │       └── ...
 ├── public-page/                      # NOT part of server/ or probe/, doesn't run on the VM --
-│   ├── index.php                     # reference PHP client of GET /api/v1/public/summary (see 7.3)
+│   ├── index.php                     # visitor-facing page -- reads MySQL only, never calls the VM
+│   ├── sync.php                      # cron entrypoint -- the only thing here that calls the VM (see 7.3/7.4)
+│   ├── db.php                        # tiny PDO connection helper, shared by the two scripts above
+│   ├── env.php                       # tiny dependency-free .env parser
+│   ├── schema.sql                    # the one MySQL table this needs (probe_cache)
+│   ├── .htaccess                     # blocks direct URL access to .env / *.pem / sync.php
 │   └── README.md
 └── docs/
     └── api-contract.md              # formal request/response schema
@@ -304,13 +324,20 @@ weathernet/
   it from `$ssl_client_s_dn` with a regex `map` block. On success, forward
   the verified CN in a header (e.g. `X-Client-Cert-CN`) to `django`.
 
-  `GET /api/v1/public/summary` (Section 7.3) also gets its own exact-match
-  location block, unauthenticated like `/api/v1/enroll` (Django's own API
-  key check is the trust boundary there, not nginx) but additionally
-  behind an nginx `limit_req_zone` — unlike every other unauthenticated
-  path here, it has no per-request credential of its own and is reachable
-  by anyone who finds the URL, so the rate limit is a real second layer,
-  not just defense-in-depth theater.
+  `GET /api/v1/public/summary` and `GET /api/v1/public/history`
+  (Section 7.3/7.4) share one `location /api/v1/public/` **prefix**
+  block — a prefix, not an exact match like `/api/v1/ingest`, on
+  purpose: it's what lets a new `public/*` view get the same handling
+  automatically, with no nginx change, the moment its Django route
+  exists. Unauthenticated like `/api/v1/enroll` (Django's own API key
+  check is the trust boundary there, not nginx) but additionally behind
+  an nginx `limit_req_zone` — unlike every other unauthenticated path
+  here, this one has no per-request credential of its own and is
+  reachable by anyone who finds the URL, so the rate limit is a real
+  second layer, not just defense-in-depth theater. In practice it's a
+  backstop, not the main defense against a traffic burst: the reference
+  external page (`public-page/`) only ever calls this from its own
+  cron job, not per visitor — see Section 3's "fourth path".
 
 All services on one Docker network, defined in `docker-compose.yml`. Use
 named volumes for `postgres` and `grafana` data so `docker compose down`
@@ -998,7 +1025,7 @@ does at the OS level (no new code under `weathernet_probe/`, just
 ## 7. API Contract
 
 Document this formally in `docs/api-contract.md` as well as implementing
-it; keep the two in sync. Three endpoints, with different trust models —
+it; keep the two in sync. Four endpoints, with different trust models —
 see Section 5.1 for how nginx handles the difference at the TLS layer.
 
 ### 7.1 `POST /api/v1/enroll` — one-time, unauthenticated by cert
@@ -1138,6 +1165,48 @@ scope (see Section 12 and `probe/weathernet_probe/sensors/bme680.py`).
 **Never included, by design, however the response shape evolves**:
 `location_address`, `owner_email`, `owner_phone`. These exist on
 `Probe` for internal/admin use only.
+
+Responses: `200` as above (`probes` may be an empty list); `401`
+missing/wrong key or endpoint disabled; `429` rate limit exceeded
+(nginx, not Django — Section 5.1).
+
+### 7.4 `GET /api/v1/public/history` — same trust model as 7.3
+
+For the external page's charts. A separate endpoint from `summary`
+rather than folded into it: most calls (i.e. most cron runs) only need
+current values, so fetching history every time would be strictly
+heavier for no benefit to that common case.
+
+Query param `hours` (optional, default `24`, clamped to `[1, 168]`;
+an unparseable value falls back to the default rather than erroring).
+
+Response `200`:
+```json
+{
+  "generated_at": "2026-08-18T09:00:00Z",
+  "window_hours": 24,
+  "probes": [
+    {
+      "name": "weather-000",
+      "series": {
+        "temperature_c": [{"time": "2026-08-18T08:00:00Z", "value": 23.1}],
+        "humidity_pct": [],
+        "pressure_hpa": [],
+        "gas_resistance_ohm": []
+      }
+    }
+  ]
+}
+```
+
+Same probe eligibility as 7.3. Every sensor type is always present in
+`series`, as `[]` if there's no reading of that type in the window —
+callers shouldn't need to guess which keys might be missing. Points
+ordered oldest to newest. No `air_quality_index` here: it's relative
+to a baseline computed as of "now" (`probes/aqi.py`), so there's no
+single historically-accurate value to attach to each past point
+without real added query complexity (a rolling-max-as-of-each-timestamp
+query) for what's fundamentally meant to be a raw-sensor-trend chart.
 
 Responses: `200` as above (`probes` may be an empty list); `401`
 missing/wrong key or endpoint disabled; `429` rate limit exceeded
@@ -1430,17 +1499,21 @@ mistakes an intentional cut for an oversight:
   exists. Note this plainly in the README so it isn't mistaken for
   negligence later. `public-page/` (Section 7.3) works around this
   narrowly for *public read access to telemetry* specifically — an
-  external page on a domain with its own real certificate calls the VM
-  server-side, so visitors never touch the VM's self-signed cert — but
-  this does not extend to Admin or Grafana themselves, which remain
-  trusted-network-only as above.
-- **Multi-probe geographic heatmap.** `GET /api/v1/public/summary`
-  (Section 7.3) already returns a list of probes with coordinates,
-  specifically so this doesn't require an API change later, but v1
-  ships with a single probe and no map UI — `public-page/` renders a
-  card per probe, not a map. A real heatmap (e.g. via Leaflet.js reading
-  the same endpoint) is future work once there's more than one probe to
-  plot.
+  external page on a domain with its own real certificate is the only
+  thing that ever reaches visitors, and only that page's own cron job
+  (`sync.php`) ever calls the VM, so visitors never touch the VM's
+  self-signed cert at all — but this does not extend to Admin or
+  Grafana themselves, which remain trusted-network-only as above.
+- **Multi-probe geographic heatmap.** `public-page/` already renders a
+  Leaflet/OpenStreetMap map with a marker per probe, colorable by
+  temperature/humidity/pressure/air quality, reading the same
+  coordinate/reading data `GET /api/v1/public/summary` (Section 7.3)
+  returns for every probe — specifically so a real interpolated
+  heatmap doesn't need an API change later, just a different renderer
+  (e.g. the `leaflet.heat` plugin) for the same data. Not built now
+  because v1 ships with a single probe, so one colored point is all
+  there is to show; future work once there's more than one probe to
+  interpolate between.
 - **High availability / scaling.** Single server VM, single
   Postgres/TimescaleDB instance handling both relational and time-series
   data. No clustering, no failover, no read replicas.
