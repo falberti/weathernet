@@ -18,6 +18,9 @@
 date_default_timezone_set('UTC');
 
 require __DIR__ . '/db.php';
+require __DIR__ . '/i18n.php';
+
+$locale = detect_locale();
 
 // A .php config file, not a plain-text .env -- see config.php.example
 // for why. Missing file (a fresh deploy before it's been created)
@@ -66,43 +69,43 @@ function fmt(?float $value, string $suffix, int $decimals = 1): string
     return $value === null ? '--' : number_format($value, $decimals) . $suffix;
 }
 
-function aqi_label(?int $score): array
+function aqi_label(?int $score, string $locale): array
 {
     if ($score === null) {
         return ['--', '#999'];
     }
     if ($score >= 70) {
-        return ['Buona', '#2e7d32'];
+        return [t($locale, 'aqi_good'), '#2e7d32'];
     }
     if ($score >= 40) {
-        return ['Moderata', '#f9a825'];
+        return [t($locale, 'aqi_moderate'), '#f9a825'];
     }
-    return ['Scarsa', '#c62828'];
+    return [t($locale, 'aqi_poor'), '#c62828'];
 }
 
-function time_ago(?string $iso8601): string
+function time_ago(?string $iso8601, string $locale): string
 {
     if ($iso8601 === null) {
-        return 'mai';
+        return t($locale, 'time_never');
     }
     $diff = time() - strtotime($iso8601);
     if ($diff < 90) {
-        return 'poco fa';
+        return t($locale, 'time_just_now');
     }
     if ($diff < 3600) {
-        return floor($diff / 60) . ' min fa';
+        return t($locale, 'time_minutes_ago', (int) floor($diff / 60));
     }
-    return floor($diff / 3600) . ' h fa';
+    return t($locale, 'time_hours_ago', (int) floor($diff / 3600));
 }
 
 $probes = load_probes_from_cache($env);
 ?>
 <!DOCTYPE html>
-<html lang="it">
+<html lang="<?= htmlspecialchars($locale) ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WeatherNet -- Dati in tempo reale</title>
+<title><?= t($locale, 'page_title') ?></title>
 <!-- Emoji as favicon, not an image asset: free by construction (a
      Unicode character, not a copyrighted graphic), rendered by the
      visitor's own OS emoji font, no extra request or license to track. -->
@@ -158,42 +161,64 @@ $probes = load_probes_from_cache($env);
     font-size: 0.85rem; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.08);
   }
   .map-controls input { margin-right: 0.35rem; }
+
+  .lang-switcher {
+    position: fixed; top: 1rem; right: 1rem; z-index: 1000;
+  }
+  .lang-switcher select {
+    background: #fff; border: 1px solid #ddd; border-radius: 999px;
+    padding: 0.35rem 0.75rem; font-size: 0.85rem; cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08); appearance: auto;
+  }
+  .lang-switcher noscript button {
+    margin-left: 0.35rem; border-radius: 999px; border: 1px solid #ddd;
+    background: #fff; padding: 0.35rem 0.6rem; font-size: 0.8rem; cursor: pointer;
+  }
 </style>
 </head>
 <body>
+  <form class="lang-switcher" method="get">
+    <select name="lang" onchange="this.form.submit()" aria-label="Language / Lingua">
+      <?php foreach (LOCALE_LABELS as $code => $label): ?>
+        <option value="<?= $code ?>"<?= $code === $locale ? ' selected' : '' ?>><?= $label ?></option>
+      <?php endforeach; ?>
+    </select>
+    <noscript><button type="submit">OK</button></noscript>
+  </form>
+
   <h1>&#9925; WeatherNet</h1>
-  <p class="subtitle">Rilevazioni meteo in tempo reale dalle sonde della rete</p>
+  <p class="subtitle"><?= t($locale, 'subtitle') ?></p>
 
   <?php if (empty($probes)): ?>
-    <p class="empty">Dati momentaneamente non disponibili. Riprova tra qualche minuto.</p>
+    <p class="empty"><?= t($locale, 'empty_state') ?></p>
   <?php else: ?>
     <div class="grid">
       <?php foreach ($probes as $probe): ?>
         <?php
           $r = $probe['readings'];
-          [$aqiLabel, $aqiColor] = aqi_label($r['air_quality_index']);
+          [$aqiLabel, $aqiColor] = aqi_label($r['air_quality_index'], $locale);
         ?>
         <div class="card">
           <h2><?= htmlspecialchars($probe['name']) ?></h2>
           <div class="meta">
-            Zona: <?= number_format($probe['latitude'], 2) ?>, <?= number_format($probe['longitude'], 2) ?>
-            &middot; aggiornato <?= time_ago($probe['last_seen_at']) ?>
+            <?= t($locale, 'zone') ?>: <?= number_format($probe['latitude'], 2) ?>, <?= number_format($probe['longitude'], 2) ?>
+            &middot; <?= t($locale, 'updated') ?> <?= time_ago($probe['last_seen_at'], $locale) ?>
           </div>
           <div class="readings">
             <div class="reading">
-              <div class="label">Temperatura</div>
+              <div class="label"><?= t($locale, 'reading_temperature') ?></div>
               <div class="value"><?= fmt($r['temperature_c'], ' &deg;C') ?></div>
             </div>
             <div class="reading">
-              <div class="label">Umidit&agrave;</div>
+              <div class="label"><?= t($locale, 'reading_humidity') ?></div>
               <div class="value"><?= fmt($r['humidity_pct'], '%', 0) ?></div>
             </div>
             <div class="reading">
-              <div class="label">Pressione</div>
+              <div class="label"><?= t($locale, 'reading_pressure') ?></div>
               <div class="value"><?= fmt($r['pressure_hpa'], ' hPa', 0) ?></div>
             </div>
             <div class="reading">
-              <div class="label">Qualit&agrave; aria</div>
+              <div class="label"><?= t($locale, 'reading_aqi') ?></div>
               <div class="value">
                 <span class="aqi-badge" style="background:<?= $aqiColor ?>"><?= $aqiLabel ?></span>
               </div>
@@ -203,13 +228,13 @@ $probes = load_probes_from_cache($env);
       <?php endforeach; ?>
     </div>
 
-    <h2 class="section-title">Mappa</h2>
+    <h2 class="section-title"><?= t($locale, 'map_title') ?></h2>
     <div class="map-section">
       <div class="map-controls">
-        <label><input type="radio" name="map-param" value="air_quality_index" checked> Qualit&agrave; aria</label>
-        <label><input type="radio" name="map-param" value="temperature_c"> Temperatura</label>
-        <label><input type="radio" name="map-param" value="humidity_pct"> Umidit&agrave;</label>
-        <label><input type="radio" name="map-param" value="pressure_hpa"> Pressione</label>
+        <label><input type="radio" name="map-param" value="air_quality_index" checked> <?= t($locale, 'reading_aqi') ?></label>
+        <label><input type="radio" name="map-param" value="temperature_c"> <?= t($locale, 'reading_temperature') ?></label>
+        <label><input type="radio" name="map-param" value="humidity_pct"> <?= t($locale, 'reading_humidity') ?></label>
+        <label><input type="radio" name="map-param" value="pressure_hpa"> <?= t($locale, 'reading_pressure') ?></label>
       </div>
       <div id="map"></div>
     </div>
@@ -218,25 +243,33 @@ $probes = load_probes_from_cache($env);
   <footer>
     <div class="footer-links">
       <?php if ($telegramBotUsername !== ''): ?>
-        <a href="https://t.me/<?= htmlspecialchars($telegramBotUsername) ?>" target="_blank" rel="noopener">
-          &#9992;&#65039; Bot &quot;Bernacca&quot;
+        <a href="https://t.me/<?= htmlspecialchars($telegramBotUsername) ?>" target="_blank" rel="noopener"
+           aria-label="<?= t($locale, 'telegram_tooltip') ?>" title="<?= t($locale, 'telegram_tooltip') ?>">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M2 21l21-9L2 3v7l15 2-15 2z"></path>
+          </svg>
         </a>
       <?php endif; ?>
       <a href="https://github.com/falberti/weathernet" target="_blank" rel="noopener"
-         aria-label="Il progetto su GitHub" title="Il progetto su GitHub">
+         aria-label="<?= t($locale, 'github_tooltip') ?>" title="<?= t($locale, 'github_tooltip') ?>">
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
         </svg>
       </a>
     </div>
-    Coordinate approssimate per tutela della privacy &middot; Indice qualit&agrave;
-    aria euristico, non certificato
+    <?= t($locale, 'footer_disclaimer') ?>
   </footer>
 
 <?php if (!empty($probes)): ?>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const probes = <?= json_encode($probes) ?>;
+    const LABELS = {
+      temperature: <?= json_encode(t($locale, 'reading_temperature')) ?>,
+      humidity: <?= json_encode(t($locale, 'reading_humidity')) ?>,
+      pressure: <?= json_encode(t($locale, 'reading_pressure')) ?>,
+      aqi: <?= json_encode(t($locale, 'reading_aqi')) ?>,
+    };
 
     // --- Map ---
     // One marker per probe today, colored by the selected parameter --
@@ -309,10 +342,10 @@ $probes = load_probes_from_cache($env);
         }).addTo(map);
         marker.bindPopup(
           `<strong>${probe.name}</strong><br>` +
-          `Temperatura: ${probe.readings.temperature_c ?? '--'} &deg;C<br>` +
-          `Umidità: ${probe.readings.humidity_pct ?? '--'}%<br>` +
-          `Pressione: ${probe.readings.pressure_hpa ?? '--'} hPa<br>` +
-          `Qualità aria: ${probe.readings.air_quality_index ?? '--'}`
+          `${LABELS.temperature}: ${probe.readings.temperature_c ?? '--'} &deg;C<br>` +
+          `${LABELS.humidity}: ${probe.readings.humidity_pct ?? '--'}%<br>` +
+          `${LABELS.pressure}: ${probe.readings.pressure_hpa ?? '--'} hPa<br>` +
+          `${LABELS.aqi}: ${probe.readings.air_quality_index ?? '--'}`
         );
         return marker;
       });

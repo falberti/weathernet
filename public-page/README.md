@@ -66,6 +66,17 @@ only carries the link.
 - `index.php` -- the page. Reads `probe_cache` via `db.php`, renders
   the current-reading cards and an OpenStreetMap/Leaflet map (marker
   per probe, colorable by temperature/humidity/pressure/air quality).
+- `i18n.php` -- Italian/English/French/German strings plus
+  `detect_locale()`. Priority: an explicit choice from the flag
+  dropdown (`?lang=xx`, top-right on `index.php`) beats a remembered
+  previous choice (`weathernet_lang` cookie, set only when a request
+  carries a fresh `?lang=`) beats the browser's `Accept-Language`
+  header beats English as the last-resort default. The cookie is
+  first-party, stores only the language the visitor just explicitly
+  picked, and is never set on a plain page load -- see the comment at
+  the top of `i18n.php` for why that's exempt from cookie consent
+  under ePrivacy/GDPR the same way the rest of this otherwise
+  cookie-free site is.
 - `sync.php` -- the cron entrypoint. Fetches both VM endpoints and
   upserts `probe_cache`. Refuses to run outside a CLI context (i.e. a
   browser hitting its URL directly gets a 403) -- `.htaccess` also
@@ -113,7 +124,7 @@ only carries the link.
    the Telegram bot (see above) is set up, also set
    `TELEGRAM_BOT_USERNAME` to show the link -- leave it blank to hide it.
 
-5. Upload `index.php`, `sync.php`, `db.php`, `config.php`,
+5. Upload `index.php`, `i18n.php`, `sync.php`, `db.php`, `config.php`,
    `weathernet-ca.pem`, and `.htaccess` (all in the same directory) to
    your PHP hosting.
 
