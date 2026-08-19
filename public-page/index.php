@@ -17,10 +17,14 @@
 
 date_default_timezone_set('UTC');
 
-require __DIR__ . '/env.php';
 require __DIR__ . '/db.php';
 
-$env = load_env(__DIR__ . '/.env');
+// A .php config file, not a plain-text .env -- see config.php.example
+// for why. Missing file (a fresh deploy before it's been created)
+// degrades to an empty config rather than a fatal error, matching the
+// "show the graceful empty state" behavior elsewhere on this page.
+$configFile = __DIR__ . '/config.php';
+$env = is_file($configFile) ? require $configFile : [];
 $telegramBotUsername = $env['TELEGRAM_BOT_USERNAME'] ?? '';
 
 /**
@@ -215,7 +219,7 @@ $probes = load_probes_from_cache($env);
     <div class="footer-links">
       <?php if ($telegramBotUsername !== ''): ?>
         <a href="https://t.me/<?= htmlspecialchars($telegramBotUsername) ?>" target="_blank" rel="noopener">
-          &#9992;&#65039; Bernacca_bot
+          &#9992;&#65039; Bot &quot;Bernacca&quot;
         </a>
       <?php endif; ?>
       <a href="https://github.com/falberti/weathernet" target="_blank" rel="noopener"

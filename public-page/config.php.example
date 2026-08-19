@@ -1,0 +1,32 @@
+<?php
+// Copy to config.php and fill in real values. A .php file, not a
+// plain-text .env: any PHP hosting executes .php files rather than
+// serving their source, so this needs no .htaccess (or equivalent)
+// rule to stay confidential -- unlike a text file, whose protection
+// depends on the web server actually being Apache, AllowOverride
+// being enabled for this directory, and the rule file being uploaded
+// correctly. Requesting this file's URL directly just returns a blank
+// page (the `return` below ends the script before anything is
+// echoed), never the values. Keep it out of version control too if
+// you put this directory under git on the hosting side.
+return [
+    // The WeatherNet server's public IP (or hostname). Only sync.php
+    // uses this -- index.php reads MySQL only, it never talks to the VM.
+    'VM_HOST' => '203.0.113.10',
+    // Must match PUBLIC_SUMMARY_API_KEY in server/.env on the VM.
+    'API_KEY' => 'changeme',
+
+    // MySQL, as created in your hosting control panel -- see schema.sql
+    // for the one table this needs (probe_cache).
+    'DB_HOST' => 'localhost',
+    'DB_NAME' => 'changeme',
+    'DB_USER' => 'changeme',
+    'DB_PASS' => 'changeme',
+
+    // The Telegram bot's @username (without the @), matching
+    // TELEGRAM_BOT_USERNAME in server/.env on the VM -- only used to
+    // build the t.me/<username> link on this page. Not sensitive
+    // (it's public by definition, same as the link itself), kept here
+    // anyway just to have one place to change it.
+    'TELEGRAM_BOT_USERNAME' => 'changeme',
+];

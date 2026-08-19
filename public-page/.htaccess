@@ -1,10 +1,13 @@
-# .env holds the API key and MySQL credentials -- this one actually is
-# a secret, block it outright. The CA cert isn't secret (it's the same
-# file handed to every probe during enrollment) but there's no reason
-# to leave it directly fetchable by URL either.
-<Files ".env">
+# config.php holds the API key and MySQL credentials, but as a .php
+# file it's already safe by construction: any PHP hosting executes it
+# rather than serving its source, so a direct request just gets a
+# blank page, never the values (see config.php.example). This block is
+# defense-in-depth, not the load-bearing protection -- it also covers
+# any old .env this directory might still have from before that
+# design, and the case where a leftover .bak/~ copy exists.
+<FilesMatch "^(config\.php|\.env.*|.*\.bak|.*~)$">
     Require all denied
-</Files>
+</FilesMatch>
 
 <FilesMatch "\.pem$">
     Require all denied

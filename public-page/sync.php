@@ -31,7 +31,6 @@ if (PHP_SAPI !== 'cli') {
     exit("sync.php is meant to run from cron, not a browser.\n");
 }
 
-require __DIR__ . '/env.php';
 require __DIR__ . '/db.php';
 
 const CA_CERT_FILE = __DIR__ . '/weathernet-ca.pem';
@@ -72,12 +71,13 @@ function to_mysql_datetime(?string $iso8601): ?string
     return date('Y-m-d H:i:s', strtotime($iso8601));
 }
 
-$env = load_env(__DIR__ . '/.env');
+$configFile = __DIR__ . '/config.php';
+$env = is_file($configFile) ? require $configFile : [];
 $vmHost = $env['VM_HOST'] ?? '';
 $apiKey = $env['API_KEY'] ?? '';
 
 if ($vmHost === '' || $apiKey === '') {
-    fwrite(STDERR, "sync.php: VM_HOST/API_KEY not configured in .env -- see README.md\n");
+    fwrite(STDERR, "sync.php: VM_HOST/API_KEY not configured in config.php -- see README.md\n");
     exit(1);
 }
 

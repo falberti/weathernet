@@ -11,7 +11,7 @@ server/wireguard/server_public.key
 probe/venv/
 
 # Public page deployment artifacts (per-deployment, not source).
-public-page/.env
+public-page/config.php
 public-page/weathernet-ca.pem
 
 # Python
