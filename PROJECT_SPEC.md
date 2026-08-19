@@ -182,6 +182,21 @@ predictable rate — the nginx rate limit above is a backstop, not the
 thing actually controlling load in the common case. See
 `public-page/README.md` for the full design and deploy steps.
 
+`public-page/`'s own secrets (the API key above, MySQL credentials)
+live in `config.php`, a `.php` file that `return`s an array — not a
+plain-text `.env`. This matters specifically because `public-page/`
+runs on arbitrary external PHP hosting this project doesn't control:
+a `.env`'s confidentiality depends on the web server being Apache with
+`AllowOverride` enabled for that directory and an `.htaccess` rule
+having actually been uploaded correctly, none of which is guaranteed
+on generic/budget hosting. A `.php` file needs none of that — any host
+serving this page at all is, by definition, executing `.php` files
+rather than serving their source, so a direct request to `config.php`
+returns a blank page (the `return` ends the script before anything is
+echoed), never the secrets. `.htaccess` still denies it directly
+(`public-page/.htaccess`), but as defense in depth, not the thing
+actually protecting it.
+
 **A fifth path: a Telegram bot for a daily weather digest.** Not part
 of the API contract at all — this is a `subscriptions` Django app plus
 a `telegram-bot` service that long-polls Telegram's Bot API
@@ -292,9 +307,9 @@ weathernet/
 │   ├── index.php                     # visitor-facing page -- reads MySQL only, never calls the VM
 │   ├── sync.php                      # cron entrypoint -- the only thing here that calls the VM (see 7.3/7.4)
 │   ├── db.php                        # tiny PDO connection helper, shared by the two scripts above
-│   ├── env.php                       # tiny dependency-free .env parser
+│   ├── config.php.example            # copy to config.php -- a .php file, not a .env, see below
 │   ├── schema.sql                    # the one MySQL table this needs (probe_cache)
-│   ├── .htaccess                     # blocks direct URL access to .env / *.pem / sync.php
+│   ├── .htaccess                     # blocks direct URL access to config.php / *.pem / sync.php
 │   └── README.md
 └── docs/
     └── api-contract.md              # formal request/response schema
