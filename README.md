@@ -315,3 +315,24 @@ to wait for the next tick.
 
 See [`server/README.md`](server/README.md) and
 [`probe/README.md`](probe/README.md) for component-specific detail.
+
+## License
+
+This repository is [MIT-licensed](LICENSE), including everything under
+[`hardware/`](hardware/) so far. That said, 3D-printable designs there
+could in principle start from or modify someone else's
+differently-licensed model in the future -- check each part's own
+`LICENSE`/`README.md` before reusing it if one exists (see
+[`hardware/README.md`](hardware/README.md) for the convention).
+
+## Acknowledgments
+
+- [`hardware/S30_BM680_enclosure/`](hardware/S30_BM680_enclosure/) was inspired by
+  [allmysparetime's Sensirion SPS30 / Adafruit BME280 Weatherproof
+  Outdoor Enclosure](https://www.printables.com/model/530737-sensirion-sps30-adafruit-bme280-weatherproof-outdo)
+  (CC BY-NC-SA 4.0) -- printed as-is first, found it didn't fit this
+  project's BME680 board, then modeled from scratch in FreeCAD rather
+  than modified from that design's own files. See
+  [`hardware/S30_BM680_enclosure/README.md`](hardware/S30_BM680_enclosure/README.md) for
+  why that makes this an independent design, not a derivative one,
+  credited here simply because it's the honest thing to do.

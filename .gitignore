@@ -30,3 +30,10 @@ server/django_app/local_settings.py
 .DS_Store
 .idea/
 .vscode/
+
+# CAD tool backup/autosave cruft (hardware/) -- adjust for whatever
+# tool is actually in use; these are just the common ones.
+*.FCBak
+*.FCStd1
+*~lock*
+

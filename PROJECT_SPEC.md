@@ -197,6 +197,25 @@ echoed), never the secrets. `.htaccess` still denies it directly
 (`public-page/.htaccess`), but as defense in depth, not the thing
 actually protecting it.
 
+`public-page/index.php` is localized (Italian, English, French,
+German — `public-page/i18n.php`). Locale priority: an explicit choice
+from the flag dropdown in the page's top-right corner (a plain GET
+`<form>`, `?lang=xx`, works with JavaScript disabled via a `<noscript>`
+submit button) beats a remembered previous choice (`weathernet_lang`
+cookie, written only when a request carries a fresh `?lang=` — never
+on a plain page load) beats the visitor's `Accept-Language` header
+beats English as the last-resort default. That cookie is the one
+exception to `public-page/` otherwise setting no cookies at all — it's
+first-party, stores nothing but the language the visitor just
+explicitly picked, and exists for no purpose beyond honoring that
+pick, which is the textbook "strictly necessary" exemption under
+ePrivacy/GDPR (storage a user's own explicit action requested, not
+tracking): it doesn't require cookie consent any more than the rest of
+this page does. Translated strings needed by the map's marker popups
+are passed from PHP into the page's `<script>` block the same way
+`probes` itself is (`json_encode()`), so there's exactly one source of
+truth (`i18n.php`) for every user-facing string, PHP-rendered or not.
+
 **A fifth path: a Telegram bot for a daily weather digest.** Not part
 of the API contract at all — this is a `subscriptions` Django app plus
 a `telegram-bot` service that long-polls Telegram's Bot API
@@ -305,12 +324,20 @@ weathernet/
 │       └── ...
 ├── public-page/                      # NOT part of server/ or probe/, doesn't run on the VM --
 │   ├── index.php                     # visitor-facing page -- reads MySQL only, never calls the VM
+│   ├── i18n.php                      # it/en/fr/de strings, detect_locale(), see below
 │   ├── sync.php                      # cron entrypoint -- the only thing here that calls the VM (see 7.3/7.4)
 │   ├── db.php                        # tiny PDO connection helper, shared by the two scripts above
 │   ├── config.php.example            # copy to config.php -- a .php file, not a .env, see below
 │   ├── schema.sql                    # the one MySQL table this needs (probe_cache)
 │   ├── .htaccess                     # blocks direct URL access to config.php / *.pem / sync.php
 │   └── README.md
+├── hardware/                          # 3D-printable enclosure/mount designs -- see 11 for licensing
+│   ├── README.md                     # file-format + per-part licensing convention
+│   └── S30_BM680_enclosure/          # MIT (inspired by, not derived from, a third-party CC design)
+│       ├── README.md
+│       ├── case.FCStd                 # FreeCAD source
+│       ├── case.step
+│       └── case.stl
 └── docs/
     └── api-contract.md              # formal request/response schema
 ```
@@ -1616,6 +1643,28 @@ The top-level `README.md` must include, in this order:
   test — actually exercises the race condition the `select_for_update()`
   locking is meant to prevent, e.g. via two near-simultaneous requests in a
   test). Full test coverage is not a v1 goal.
+- **Licensing is per-directory, not automatically repo-wide, under
+  `hardware/`.** The top-level `LICENSE` (MIT) covers `server/`,
+  `probe/`, `public-page/`, and, as it happens, every `hardware/`
+  subdirectory too today — but not automatically or by default.
+  3D-printable designs there can easily start from someone else's
+  Creative-Commons-licensed model; whether that's a licensing
+  obligation depends on whether the result was actually *derived from*
+  that model's own files (importing/tracing/modifying its mesh) or
+  just *inspired by* it (rebuilt from scratch — copyright protects the
+  specific expression of a design, not the general idea, nor
+  dimensions a physical component dictates). `hardware/S30_BM680_enclosure/`
+  is the latter: it started from a CC BY-NC-SA 4.0 design, but that
+  design didn't fit the project's actual BME680 board, so it was
+  rebuilt from scratch in FreeCAD with no geometry imported from the
+  original — an independent work, not a derivative one, hence MIT
+  rather than carrying the CC license forward. Before publishing any
+  new design under `hardware/` that started from someone else's work:
+  if it's an actual modification of their files, add a `LICENSE` file
+  to that part's own subdirectory carrying their license forward
+  (most CC "ShareAlike" variants and the GPL family require exactly
+  that) — never assume MIT applies there by default in that case. See
+  `hardware/README.md`.
 
 ## 12. Explicitly Out of Scope for v1
 
