@@ -8,3 +8,11 @@ requests>=2.31,<3.0
 # this only matters for real Pi deployments anyway.
 bme680>=1.1.1,<2.0
 smbus2>=0.4,<1.0
+# BMP280 real sensor driver (weathernet_probe/sensors/bmp280.py).
+bmp280>=1.0.0,<2.0
+# SPS30 real sensor driver (weathernet_probe/sensors/sps30.py). No
+# separate package needed for HTU21D-F (weathernet_probe/sensors/
+# htu21d.py) -- it's implemented directly against smbus2 above.
+sensirion-i2c-sps30>=1.0.0,<2.0
+sensirion-i2c-driver>=1.0.0,<2.0
+sensirion-driver-adapters>=2.3,<3.0

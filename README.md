@@ -206,6 +206,116 @@ sensor wired up, is harmless (see the module's docstring), but reading
 one without the package installed raises a clear, per-sensor
 `SensorReadError` rather than crashing the daemon.
 
+### BMP280, HTU21D-F, SPS30 wiring (I2C)
+
+The included `bmp280_*` (`weathernet_probe/sensors/bmp280.py`),
+`htu21d_*` (`weathernet_probe/sensors/htu21d.py`) and `sps30_*`
+(`weathernet_probe/sensors/sps30.py`) drivers all expect I2C, and all
+three chips can share the same two-wire bus (Pi pins 3/SDA and 5/SCL)
+since each answers to a different address -- no separate bus needed for
+a breadboard bring-up with all three wired at once.
+
+| Chip     | I2C address | VCC pin                | Notes |
+|----------|-------------|-------------------------|-------|
+| BMP280   | `0x77`      | Pin 1 (3.3V)             | See below -- this board's pin names and default address differ from a typical generic breakout. |
+| HTU21D-F | `0x40`      | Pin 1 (3.3V)             | Fixed address, no SDO/address pin on this chip. **Not** 5V. |
+| SPS30    | `0x69`      | **Pin 2 or 4 (5V)**      | See below -- this one is different from the other two. |
+
+Common to all three: `GND` to Pin 6/9, `SCL` to Pin 5 (GPIO3/SCL1), `SDA`
+to Pin 3 (GPIO2/SDA1).
+
+BMP280 specifics -- this project's board is
+[Adafruit #2651](https://www.adafruit.com/product/2651), which supports
+both I2C and SPI off the same header, so its silkscreen doesn't say
+`SDA`/`SCL` at all:
+
+| Board pin | Function | Pi pin |
+|---|---|---|
+| `Vin` | Power (board has its own regulator, 3-5V in) | Pin 1 (3.3V) |
+| `GND` | Ground | Pin 6 or 9 |
+| `SCK` | I2C clock (doubles as SPI clock) | Pin 5 (GPIO3, SCL1) |
+| `SDI` | I2C data (doubles as SPI MOSI) -- **this is your SDA** | Pin 3 (GPIO2, SDA1) |
+| `SDO` | SPI-only (MISO) | Leave disconnected |
+| `CS` | SPI-only (chip select) | Leave disconnected |
+
+Leaving `SDO` disconnected matters beyond just "it's unused": this
+board pulls `SDO` up to 3.3V through an onboard 10k resistor, so the
+I2C address defaults to `0x77`, not the `0x76` a lot of cheaper generic
+BMP280/BME280 breakouts default to (those instead pull `SDO`/`SDO`-
+equivalent low unless you tie it to VCC). The driver
+(`weathernet_probe/sensors/bmp280.py`) is set up for `0x77` accordingly
+-- if you ever swap in a different breakout that defaults to `0x76`
+instead, that's the one line to change. `3Vo` (the board's own
+regulated 3.3V output) isn't used here -- it's meant for powering
+*other* 3.3V-logic devices from this board, not an input.
+
+SPS30 specifics -- it ships with a 5-pin JST ZHR connector, not breakout
+header pins, and its pin assignment is `1=VDD, 2=SDA, 3=SCL, 4=SEL,
+5=GND` (per Sensirion's datasheet Table 4 -- easy to get wrong since
+several third-party wiring guides transcribe this table incorrectly).
+Pin 1 is the pin closest to the sensor's body, pin 5 is closest to the
+free end of the connector (Figure 1 in Sensirion's datasheet).
+
+**Wire colors are not standardized across cables/vendors** -- don't
+trust a generic color guide found online; verify against the datasheet
+figure for your own cable. For the pigtail that shipped with this
+project's sensor, counted from the sensor body outward, the colors are
+black-red-white-yellow-orange:
+
+| Pin | Wire color (this project's cable) | Pi pin | Notes |
+|---|---|---|---|
+| 1 (VDD) | black | Pin 2 or 4 (**5V**) | The sensor needs 5V to run its fan -- **not** 3.3V, unlike BMP280/HTU21D-F above. Unusual that black is the power wire here, not ground -- verified against the connector's physical pin 1/pin 5 positions, not assumed from color. |
+| 2 (SDA) | red | Pin 3 (GPIO2, SDA1) | Shared with the other two chips' SDA. |
+| 3 (SCL) | white | Pin 5 (GPIO3, SCL1) | Shared with the other two chips' SCL. |
+| 4 (SEL) | yellow | GND | Selects I2C mode. Leave floating instead to select UART (not what this driver uses). |
+| 5 (GND) | orange | Pin 6 or 9 | |
+
+If you ever swap in a different SPS30 cable, re-derive this table from
+the connector's physical pin 1/pin 5 position (per Sensirion's Figure
+1) rather than assuming these same colors -- they're specific to this
+cable, not a general SPS30 convention.
+
+Running SPS30's I2C lines (SDA/SCL) at the Pi's 3.3V logic level despite
+the sensor's own 5V supply is safe and doesn't need a level shifter --
+Sensirion's datasheet documents the interface pins as "LVTTL 3.3V
+compatible" regardless of `VDD`, unlike the supply pin itself.
+
+Then, same as BME680:
+
+```bash
+sudo raspi-config nonint do_i2c 0
+sudo apt-get install -y i2c-tools
+i2cdetect -y 1   # expect to see devices at 40, 69, and 77
+```
+
+```bash
+cd ~/weathernet/probe
+source venv/bin/activate && pip install -r requirements.txt && deactivate
+sudo systemctl restart weathernet-probe
+```
+
+A few things worth knowing about how these three differ from BME680:
+
+- **BMP280 and HTU21D-F both report temperature.** Their `sensor_type`
+  values are prefixed with the chip name (`bmp280_temperature_c`,
+  `htu21d_temperature_c`) specifically so both can be wired and active
+  at once -- e.g. to sanity-check one against the other during
+  bring-up -- without colliding in storage or on a Grafana panel the
+  way two `temperature_c` series would. BME680's own sensors keep their
+  original generic names (`temperature_c`, etc.) for backward
+  compatibility with already-stored data and the existing dashboard
+  panels; this is a deliberate inconsistency, not an oversight.
+- **SPS30 needs ~10 seconds after startup before its first real
+  reading** -- the fan has to physically spin up and the airflow has to
+  stabilize before a mass-concentration reading means anything. The
+  driver returns a clear `SensorReadError` ("still warming up") during
+  that window rather than a garbage value; this is expected on every
+  daemon (re)start, not a fault.
+- **SPS30's four `sps30_pm*` sensors share one physical device and one
+  cached reading per cycle** (like BME680's four sensors do), since the
+  chip only produces a new sample about once a second regardless of how
+  many of the four are configured.
+
 ## Reaching a probe remotely
 
 SSH into the server first (your existing access to it, unrelated to
@@ -242,10 +352,12 @@ to wait for the next tick.
 
 ## Known limitations of v1
 
-- **Mostly mock sensors.** A real BME680 driver (temperature, humidity,
-  pressure, gas resistance) is implemented -- see "Adding a real sensor
-  driver" above and `weathernet_probe/sensors/bme680.py`. SPS30, a wind
-  vane/anemometer, and a rain gauge are still not implemented.
+- **Mostly mock sensors.** Real drivers exist for BME680 (temperature,
+  humidity, pressure, gas resistance), BMP280 (temperature, pressure),
+  HTU21D-F (temperature, humidity), and SPS30 (PM1.0/2.5/4.0/10
+  particulate mass concentration) -- see "Adding a real sensor driver"
+  above and `weathernet_probe/sensors/`. A wind vane/anemometer and a
+  rain gauge are still not implemented.
 - **Raspberry Pi only.** No Arduino / non-Linux probe support yet.
 - **No certificate rotation or revocation.** Enrollment solves
   *issuance*, not the full lifecycle -- issued certs are long-lived,

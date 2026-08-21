@@ -24,8 +24,11 @@ report_interval_seconds: 300
 # Names must match entries in weathernet_probe/sensors/registry.py.
 # Mock sensors (always available, no hardware needed):
 #   mock_temperature, mock_humidity, mock_pressure
-# Real BME680 over I2C (see the top-level README for wiring):
+# Real sensors over I2C (see the top-level README for wiring):
 #   bme680_temperature, bme680_humidity, bme680_pressure, bme680_gas
+#   bmp280_temperature, bmp280_pressure
+#   htu21d_temperature, htu21d_humidity
+#   sps30_pm1_0, sps30_pm2_5, sps30_pm4_0, sps30_pm10
 sensors:
   - mock_temperature
   - mock_humidity

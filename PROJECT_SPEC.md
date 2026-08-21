@@ -1079,10 +1079,12 @@ This is the most important structural piece of the probe for future-proofing.
   read failure — a failed sensor must not crash the whole reporting cycle).
 - `sensors/mock.py` implements a small set of mock sensors (e.g.
   `MockTemperatureSensor`, `MockHumiditySensor`, `MockPressureSensor`) that
-  return plausible randomized values. These stand in for the real BME680 /
-  SPS30 / wind-rain drivers, which are **explicitly deferred** — see
-  Section 12. Do not attempt to wire up real I2C/SPI hardware libraries in
-  this version.
+  return plausible randomized values, useful on a probe with no real
+  sensor wired up yet. Real drivers now exist alongside them for BME680,
+  BMP280, HTU21D-F, and SPS30 (`sensors/bme680.py`, `bmp280.py`,
+  `htu21d.py`, `sps30.py` — see the README's wiring section for each). A
+  wind vane/anemometer and a rain gauge are still **explicitly
+  deferred** — see Section 12.
 - `sensors/registry.py` maps a string name (as it appears in the probe's
   YAML config) to a `Sensor` subclass, so which sensors are "active" on a
   given probe is a config change, not a code change. Adding a real driver
@@ -1662,11 +1664,13 @@ mistakes an intentional cut for an oversight:
   phone as its own peer (for direct access without that hop) is a small,
   independent addition later — same registration pattern, just one more
   `[Peer]` entry that isn't tied to a `Probe` row.
-- **Real sensor drivers** (BME680, SPS30, wind vane/anemometer via
-  MCP3008, rain gauge). v1 ships a pluggable framework with mock sensors
-  only. Adding real drivers is future work and should slot into the
-  existing `sensors/` structure without touching the transport or
-  reporting logic.
+- **Real sensor drivers for wind/rain.** BME680, BMP280, HTU21D-F, and
+  SPS30 (particulate matter) are implemented — see `sensors/bme680.py`,
+  `bmp280.py`, `htu21d.py`, `sps30.py` and the README's wiring section.
+  A wind vane/anemometer (via MCP3008) and a rain gauge are still future
+  work, and should slot into the existing `sensors/` structure the same
+  way — one driver module plus one `registry.py` entry — without
+  touching the transport or reporting logic.
 - **Arduino / non-Linux probes.** v1 targets Raspberry Pi only. The sensor
   registry and probe config format are designed so that a future Arduino
   integration (most likely as a serial-connected peripheral behind a Pi
