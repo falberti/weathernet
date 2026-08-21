@@ -10,9 +10,17 @@ bme680>=1.1.1,<2.0
 smbus2>=0.4,<1.0
 # BMP280 real sensor driver (weathernet_probe/sensors/bmp280.py).
 bmp280>=1.0.0,<2.0
-# SPS30 real sensor driver (weathernet_probe/sensors/sps30.py). No
-# separate package needed for HTU21D-F (weathernet_probe/sensors/
+# SPS30 real sensor driver (weathernet_probe/sensors/sps30.py) -- UART,
+# not I2C, deliberately (see that module's docstring: the fan motor
+# reliably knocked this sensor off the shared I2C bus, even with a
+# proper PSU and direct point-to-point power wiring; UART is what
+# Sensirion's own datasheet recommends for exactly this EMI scenario).
+# No separate package needed for HTU21D-F (weathernet_probe/sensors/
 # htu21d.py) -- it's implemented directly against smbus2 above.
-sensirion-i2c-sps30>=1.0.0,<2.0
-sensirion-i2c-driver>=1.0.0,<2.0
+sensirion-uart-sps30>=1.0.0,<2.0
+# Pinned to the 0.x line deliberately: sensirion-uart-sps30 1.0.0
+# itself declares sensirion-shdlc-driver~=0.1.5 as of this writing, so
+# letting pip pick the newest 1.x here would just be a version pip
+# can't actually resolve against -- see the README's SPS30 section.
+sensirion-shdlc-driver>=0.1.5,<0.2.0
 sensirion-driver-adapters>=2.3,<3.0

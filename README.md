@@ -206,22 +206,20 @@ sensor wired up, is harmless (see the module's docstring), but reading
 one without the package installed raises a clear, per-sensor
 `SensorReadError` rather than crashing the daemon.
 
-### BMP280, HTU21D-F, SPS30 wiring (I2C)
+### BMP280, HTU21D-F wiring (I2C)
 
-The included `bmp280_*` (`weathernet_probe/sensors/bmp280.py`),
-`htu21d_*` (`weathernet_probe/sensors/htu21d.py`) and `sps30_*`
-(`weathernet_probe/sensors/sps30.py`) drivers all expect I2C, and all
-three chips can share the same two-wire bus (Pi pins 3/SDA and 5/SCL)
-since each answers to a different address -- no separate bus needed for
-a breadboard bring-up with all three wired at once.
+The included `bmp280_*` (`weathernet_probe/sensors/bmp280.py`) and
+`htu21d_*` (`weathernet_probe/sensors/htu21d.py`) drivers both expect
+I2C, and both chips can share the same two-wire bus (Pi pins 3/SDA and
+5/SCL) since each answers to a different address. SPS30 is **not** on
+this bus -- see its own UART section below, and why.
 
 | Chip     | I2C address | VCC pin                | Notes |
 |----------|-------------|-------------------------|-------|
 | BMP280   | `0x77`      | Pin 1 (3.3V)             | See below -- this board's pin names and default address differ from a typical generic breakout. |
 | HTU21D-F | `0x40`      | Pin 1 (3.3V)             | Fixed address, no SDO/address pin on this chip. **Not** 5V. |
-| SPS30    | `0x69`      | **Pin 2 or 4 (5V)**      | See below -- this one is different from the other two. |
 
-Common to all three: `GND` to Pin 6/9, `SCL` to Pin 5 (GPIO3/SCL1), `SDA`
+Common to both: `GND` to Pin 6/9, `SCL` to Pin 5 (GPIO3/SCL1), `SDA`
 to Pin 3 (GPIO2/SDA1).
 
 BMP280 specifics -- this project's board is
@@ -249,43 +247,12 @@ instead, that's the one line to change. `3Vo` (the board's own
 regulated 3.3V output) isn't used here -- it's meant for powering
 *other* 3.3V-logic devices from this board, not an input.
 
-SPS30 specifics -- it ships with a 5-pin JST ZHR connector, not breakout
-header pins, and its pin assignment is `1=VDD, 2=SDA, 3=SCL, 4=SEL,
-5=GND` (per Sensirion's datasheet Table 4 -- easy to get wrong since
-several third-party wiring guides transcribe this table incorrectly).
-Pin 1 is the pin closest to the sensor's body, pin 5 is closest to the
-free end of the connector (Figure 1 in Sensirion's datasheet).
-
-**Wire colors are not standardized across cables/vendors** -- don't
-trust a generic color guide found online; verify against the datasheet
-figure for your own cable. For the pigtail that shipped with this
-project's sensor, counted from the sensor body outward, the colors are
-black-red-white-yellow-orange:
-
-| Pin | Wire color (this project's cable) | Pi pin | Notes |
-|---|---|---|---|
-| 1 (VDD) | black | Pin 2 or 4 (**5V**) | The sensor needs 5V to run its fan -- **not** 3.3V, unlike BMP280/HTU21D-F above. Unusual that black is the power wire here, not ground -- verified against the connector's physical pin 1/pin 5 positions, not assumed from color. |
-| 2 (SDA) | red | Pin 3 (GPIO2, SDA1) | Shared with the other two chips' SDA. |
-| 3 (SCL) | white | Pin 5 (GPIO3, SCL1) | Shared with the other two chips' SCL. |
-| 4 (SEL) | yellow | GND | Selects I2C mode. Leave floating instead to select UART (not what this driver uses). |
-| 5 (GND) | orange | Pin 6 or 9 | |
-
-If you ever swap in a different SPS30 cable, re-derive this table from
-the connector's physical pin 1/pin 5 position (per Sensirion's Figure
-1) rather than assuming these same colors -- they're specific to this
-cable, not a general SPS30 convention.
-
-Running SPS30's I2C lines (SDA/SCL) at the Pi's 3.3V logic level despite
-the sensor's own 5V supply is safe and doesn't need a level shifter --
-Sensirion's datasheet documents the interface pins as "LVTTL 3.3V
-compatible" regardless of `VDD`, unlike the supply pin itself.
-
 Then, same as BME680:
 
 ```bash
 sudo raspi-config nonint do_i2c 0
 sudo apt-get install -y i2c-tools
-i2cdetect -y 1   # expect to see devices at 40, 69, and 77
+i2cdetect -y 1   # expect to see devices at 40 and 77 -- SPS30 is not on this bus, see below
 ```
 
 ```bash
@@ -294,7 +261,7 @@ source venv/bin/activate && pip install -r requirements.txt && deactivate
 sudo systemctl restart weathernet-probe
 ```
 
-A few things worth knowing about how these three differ from BME680:
+A few things worth knowing about how these two differ from BME680:
 
 - **BMP280 and HTU21D-F both report temperature.** Their `sensor_type`
   values are prefixed with the chip name (`bmp280_temperature_c`,
@@ -305,30 +272,116 @@ A few things worth knowing about how these three differ from BME680:
   original generic names (`temperature_c`, etc.) for backward
   compatibility with already-stored data and the existing dashboard
   panels; this is a deliberate inconsistency, not an oversight.
-- **SPS30 needs ~10 seconds after startup before its first real
-  reading** -- the fan has to physically spin up and the airflow has to
-  stabilize before a mass-concentration reading means anything. The
-  driver returns a clear `SensorReadError` ("still warming up") during
-  that window rather than a garbage value; this is expected on every
-  daemon (re)start, not a fault.
-- **SPS30's four `sps30_pm*` sensors share one physical device and one
+
+### SPS30 wiring (UART)
+
+Unlike BMP280/HTU21D-F, this one is **not** on the I2C bus, deliberately
+-- see "why UART, not I2C" below. It ships with a 5-pin JST ZHR
+connector, not breakout header pins, and its pin assignment is `1=VDD,
+2=RX, 3=TX, 4=SEL, 5=GND` (per Sensirion's datasheet Table 4 -- easy to
+get wrong since several third-party wiring guides transcribe this table
+incorrectly, and note that pins 2/3 are labeled `RX`/`TX` here, not
+`SDA`/`SCL` -- I2C and UART share the same two physical pins but use
+them differently). Pin 1 is the pin closest to the sensor's body, pin 5
+is closest to the free end of the connector (Figure 1 in Sensirion's
+datasheet).
+
+**Wire colors are not standardized across cables/vendors** -- don't
+trust a generic color guide found online; verify against the datasheet
+figure for your own cable. For the pigtail that shipped with this
+project's sensor, counted from the sensor body outward, the colors are
+black-red-white-yellow-orange (same physical wires as when this was
+wired for I2C -- only the pin *function* and the Pi-side pins they
+connect to have changed):
+
+| Pin | Wire color (this project's cable) | Pi pin | Notes |
+|---|---|---|---|
+| 1 (VDD) | black | Pin 2 or 4 (**5V**) | The sensor needs 5V to run its fan -- **not** 3.3V. Wire this and GND below directly, point-to-point -- not through the breadboard (see "why UART, not I2C"). |
+| 2 (RX) | red | Pin 8 (GPIO14, **TXD**) | Sensor's RX to Pi's TX -- crossed over, as UART always is. |
+| 3 (TX) | white | Pin 10 (GPIO15, **RXD**) | Sensor's TX to Pi's RX. |
+| 4 (SEL) | yellow | **Leave disconnected** | Floating selects UART. This is the opposite of the I2C wiring (where SEL went to GND) -- if you're converting an existing I2C setup, disconnecting this wire is a required step, not optional. |
+| 5 (GND) | orange | Pin 6 or 9 | Also direct/point-to-point, not through the breadboard. |
+
+If you ever swap in a different SPS30 cable, re-derive this table from
+the connector's physical pin 1/pin 5 position (per Sensirion's Figure
+1) rather than assuming these same colors -- they're specific to this
+cable, not a general SPS30 convention.
+
+**Why UART, not I2C:** Sensirion's own datasheet recommends UART over
+I2C for cable runs over ~20cm, citing "intrinsic robustness against
+electromagnetic interference" -- and this is exactly what real hardware
+bring-up confirmed necessary: on I2C, this sensor's fan motor reliably
+knocked it off the shared bus every time `start_measurement()` spun it
+up, even after ruling out every power-supply explanation in turn (a
+proper DIN-rail PSU, and direct point-to-point VDD *and* GND wiring
+bypassing the breadboard entirely). UART uses the Pi's dedicated serial
+pins instead of the bus SDA/SCL shares with BMP280/HTU21D-F, so it
+isn't exposed to whatever was coupling noise onto those lines.
+
+**Raspberry Pi UART setup** -- on a Pi 3 (and 3B+/3A+/4B/Zero W), the
+good hardware UART (PL011) is routed to the onboard Bluetooth radio by
+default; the GPIO14/15 pins only get the "mini UART", whose baud rate
+is tied to the variable CPU core clock and isn't reliable enough for
+this. Free up the PL011 for the GPIO pins instead:
+
+```bash
+echo "dtoverlay=disable-bt" | sudo tee -a /boot/firmware/config.txt   # /boot/config.txt on older OS releases
+sudo systemctl disable hciuart bluetooth
+sudo raspi-config nonint do_serial_hw 0   # enable the UART hardware
+sudo raspi-config nonint do_serial_cons 1 # disable login shell over serial -- required, see below
+sudo reboot
+```
+
+The second `raspi-config` call matters as much as the first: by
+default Raspberry Pi OS runs a login console on the serial port, which
+will fight with the probe daemon for the same `/dev/ttyAMA0` -- both
+disabling the console *and* enabling the UART hardware are required,
+not just one or the other. After rebooting, confirm the device exists:
+
+```bash
+ls -l /dev/ttyAMA0
+```
+
+Then, same pattern as the others:
+
+```bash
+cd ~/weathernet/probe
+source venv/bin/activate && pip install -r requirements.txt && deactivate
+sudo systemctl restart weathernet-probe
+```
+
+A few things worth knowing about the SPS30 driver specifically:
+
+- **Needs ~10 seconds after startup before its first real reading** --
+  the fan has to physically spin up and the airflow has to stabilize
+  before a mass-concentration reading means anything. The driver
+  returns a clear `SensorReadError` ("still warming up") during that
+  window rather than a garbage value; this is expected on every daemon
+  (re)start, not a fault.
+- **Its four `sps30_pm*` sensors share one physical device and one
   cached reading per cycle** (like BME680's four sensors do), since the
   chip only produces a new sample about once a second regardless of how
   many of the four are configured.
-- **SPS30 self-recovers from a silent reset.** This driver only calls
+- **Self-recovers from a silent reset.** This driver only calls
   `start_measurement()` once, at process start -- if the chip's
-  internal state ever gets reset without dropping off I2C long enough
-  to notice (e.g. a brief brownout that wasn't quite enough to fail
-  `i2cdetect`, but was enough to bounce the chip back to Idle-Mode), it
-  would otherwise report "not ready" forever, since Idle-Mode never
-  produces new samples on its own. If no fresh data has arrived for
-  over 30s, the driver re-issues `start_measurement()` automatically
-  and logs `SPS30 had no fresh data for over 30s -- it may have
-  silently reset to Idle-Mode; re-issued start_measurement()`. Seeing
-  this occasionally (e.g. around a power event) is the recovery
-  working as intended, not a fault to chase; seeing it constantly
-  points back to the power-supply checks in the SPS30 wiring notes
-  above.
+  internal state ever gets reset without the process noticing (e.g. a
+  brief brownout, or any other transient that bounces it back to
+  Idle-Mode without killing the serial connection itself), it would
+  otherwise report "not ready" forever, since Idle-Mode never produces
+  new samples on its own. If no fresh data has arrived for over 30s,
+  the driver re-issues `start_measurement()` automatically and logs
+  `SPS30 had no fresh data for over 30s -- it may have silently reset
+  to Idle-Mode; re-issued start_measurement()`. Seeing this
+  occasionally (e.g. around a power event) is the recovery working as
+  intended, not a fault to chase; seeing it constantly points back to
+  the wiring/power checks above.
+- **No ready-flag command over UART, unlike I2C.** The driver instead
+  calls `read_measurement_values_uint16()` directly and treats the
+  `struct.error` that Sensirion's own SHDLC library raises on an empty
+  response frame (its way of saying "nothing new yet") as the
+  not-ready signal -- confirmed against the actual library source, not
+  assumed. If you ever see an *unrelated*-looking `struct.error`
+  surface elsewhere, this is the first place to check.
 
 ## Reaching a probe remotely
 

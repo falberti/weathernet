@@ -1,39 +1,54 @@
-"""Real SPS30 driver (particulate matter mass concentration) over I2C.
+"""Real SPS30 driver (particulate matter mass concentration) over UART.
 
-Uses Sensirion's own maintained `sensirion-i2c-sps30` package (plus its
-`sensirion-i2c-driver` / `sensirion-driver-adapters` dependencies)
-rather than a hand-rolled I2C protocol implementation or one of the
-several unofficial single-maintainer PyPI packages -- the SPS30's I2C
-framing (per-word CRC-8, a UART/I2C-shared command set, selectable
-uint16/float output format) is fiddly enough, and the manufacturer's
-own driver is actively maintained (unlike the alternatives found), that
-reimplementing it isn't worth it. Same reasoning as bme680.py.
+Uses Sensirion's own maintained `sensirion-uart-sps30` package (plus its
+`sensirion-shdlc-driver` / `sensirion-driver-adapters` dependencies)
+rather than a hand-rolled SHDLC protocol implementation -- same
+reasoning as bme680.py.
 
-Imports of the `sensirion_i2c_*` / `sensirion_driver_adapters` packages
-are guarded so this module, and therefore the whole sensor registry,
-still imports cleanly without them installed or with no I2C bus at all.
-Only actually *using* a sensor here without the packages installed
-raises SensorReadError, not importing this file.
+UART instead of I2C (this project's original choice) specifically
+because Sensirion's own datasheet recommends UART for its "intrinsic
+robustness against electromagnetic interference" on longer/breadboard
+cabling -- confirmed necessary in practice: on I2C, this sensor's own
+fan motor reliably knocked it off the shared bus on every
+start_measurement(), even after ruling out every power-supply
+explanation (a proper DIN-rail PSU, direct point-to-point VDD *and*
+GND wiring bypassing the breadboard entirely -- see the README's SPS30
+wiring section for the full story). UART uses the Pi's dedicated
+serial pins instead of the shared I2C bus, so it isn't exposed to
+whatever was coupling noise onto SDA/SCL.
+
+Imports of the `sensirion_shdlc_driver` / `sensirion_uart_sps30` /
+`sensirion_driver_adapters` packages are guarded so this module, and
+therefore the whole sensor registry, still imports cleanly without
+them installed or with no serial port at all. Only actually *using* a
+sensor here without the packages installed raises SensorReadError, not
+importing this file.
 """
+import struct
 import threading
 import time
 
 from .base import Sensor, SensorReadError
 
 try:
-    from sensirion_driver_adapters.i2c_adapter.i2c_channel import I2cChannel
-    from sensirion_i2c_driver import CrcCalculator, I2cConnection, LinuxI2cTransceiver
-    from sensirion_i2c_sps30.commands import OutputFormat
-    from sensirion_i2c_sps30.device import Sps30Device
+    from sensirion_driver_adapters.shdlc_adapter.shdlc_channel import ShdlcChannel
+    from sensirion_shdlc_driver import ShdlcSerialPort
+    from sensirion_shdlc_driver.errors import ShdlcError
+    from sensirion_uart_sps30.commands import OutputFormat
+    from sensirion_uart_sps30.device import Sps30Device
 except ImportError:
     Sps30Device = None
 
-_I2C_DEVICE_FILE = "/dev/i2c-1"
-_I2C_ADDRESS = 0x69
+# Requires the Pi's full PL011 UART on these pins, not the variable-
+# clock "mini UART" -- see the README's SPS30 wiring section for the
+# `dtoverlay=disable-bt` config.txt change this depends on (the PL011
+# is routed to onboard Bluetooth by default on a Pi 3).
+_SERIAL_PORT = "/dev/ttyAMA0"
+_BAUDRATE = 115200
 
 # One physical sensor, shared across the four Sensor subclasses below --
 # same rationale as bme680.py's shared `_device`: a second
-# LinuxI2cTransceiver/Sps30Device would reopen /dev/i2c-1 and try to
+# ShdlcSerialPort/Sps30Device would reopen the serial port and try to
 # restart measurement mode needlessly (the chip only allows
 # start_measurement() from Idle-Mode -- see Sps30Device.start_measurement).
 _device = None
@@ -50,16 +65,16 @@ _WARMUP_SECONDS = 10
 # the ~1s cadence the datasheet promises in continuous Measurement-Mode,
 # but short enough to recover within the next reporting cycle regardless
 # of report_interval_seconds -- assume it silently reverted to
-# Idle-Mode (e.g. after an internal reset caused by a brief brownout
-# that wasn't enough to drop it off I2C entirely; this driver only ever
-# calls start_measurement() once, at process start, so it would
-# otherwise have no way to notice and would report "not ready" forever)
-# and re-issue start_measurement() to recover automatically.
+# Idle-Mode (e.g. after an internal reset) and re-issue
+# start_measurement() to recover automatically. Same reasoning as the
+# I2C version of this driver had; kept because the underlying chip
+# firmware's Idle/Measurement state machine doesn't care which
+# transport is talking to it.
 _STALE_AFTER_SECONDS = 30
 
 # The chip only produces a new sample about once a second (in
 # continuous Measurement-Mode); caching a read for a couple of seconds
-# means the four PM Sensor subclasses below share one I2C round trip
+# means the four PM Sensor subclasses below share one serial round trip
 # per reporting cycle instead of four.
 _CACHE_TTL_SECONDS = 2
 _cached_values = None
@@ -70,23 +85,23 @@ def _get_device():
     global _device, _measurement_started_at, _last_ready_at
     if Sps30Device is None:
         raise SensorReadError(
-            "the 'sensirion-i2c-sps30' package (and its sensirion-i2c-driver / "
+            "the 'sensirion-uart-sps30' package (and its sensirion-shdlc-driver / "
             "sensirion-driver-adapters dependencies) is not installed -- add it to "
             "probe/requirements.txt and reinstall (see the top-level README's SPS30 section)"
         )
     with _device_lock:
         if _device is None:
             try:
-                transceiver = LinuxI2cTransceiver(_I2C_DEVICE_FILE)
-                channel = I2cChannel(
-                    I2cConnection(transceiver),
-                    slave_address=_I2C_ADDRESS,
-                    crc=CrcCalculator(8, 0x31, 0xFF, 0x0),
-                )
+                port = ShdlcSerialPort(port=_SERIAL_PORT, baudrate=_BAUDRATE, additional_response_time=0.02)
+                channel = ShdlcChannel(port)
                 device = Sps30Device(channel)
+                try:
+                    device.stop_measurement()
+                except (OSError, ShdlcError):
+                    pass  # already idle -- fine, start_measurement below is what matters
                 device.start_measurement(OutputFormat.OUTPUT_FORMAT_UINT16)
-            except OSError as exc:
-                raise SensorReadError(f"could not initialize SPS30 over I2C: {exc}") from exc
+            except (OSError, ShdlcError) as exc:
+                raise SensorReadError(f"could not initialize SPS30 over UART: {exc}") from exc
             _device = device
             _measurement_started_at = time.monotonic()
             _last_ready_at = _measurement_started_at
@@ -104,7 +119,7 @@ def _restart_measurement(device):
     global _measurement_started_at, _last_ready_at
     try:
         device.stop_measurement()
-    except OSError:
+    except (OSError, ShdlcError):
         pass
     device.start_measurement(OutputFormat.OUTPUT_FORMAT_UINT16)
     now = time.monotonic()
@@ -127,25 +142,26 @@ def _read_all():
             )
 
         try:
-            ready = device.read_data_ready_flag()
-        except OSError as exc:
-            raise SensorReadError(f"could not read SPS30 data-ready flag: {exc}") from exc
-
-        if not ready:
+            mc_1p0, mc_2p5, mc_4p0, mc_10p0, *_rest = device.read_measurement_values_uint16()
+        except struct.error:
+            # Confirmed empirically (not just inferred from the docs):
+            # an empty SHDLC response frame -- the chip's way of saying
+            # "no new measurement since your last read" -- unpacks into
+            # exactly this exception, since the fixed-width struct
+            # format expects a full payload and got zero bytes. There's
+            # no separate ready-flag command on UART the way there is
+            # on I2C (Sps30Device here has no read_data_ready_flag()).
             if (now - _last_ready_at) > _STALE_AFTER_SECONDS:
                 try:
                     _restart_measurement(device)
-                except OSError as exc:
+                except (OSError, ShdlcError) as exc:
                     raise SensorReadError(f"could not restart SPS30 measurement mode: {exc}") from exc
                 raise SensorReadError(
                     f"SPS30 had no fresh data for over {_STALE_AFTER_SECONDS}s -- it may have "
                     "silently reset to Idle-Mode; re-issued start_measurement(), retrying warm-up"
                 )
             raise SensorReadError("SPS30 did not return fresh data this cycle")
-
-        try:
-            mc_1p0, mc_2p5, mc_4p0, mc_10p0, *_rest = device.read_measurement_values_uint16()
-        except OSError as exc:
+        except (OSError, ShdlcError) as exc:
             raise SensorReadError(f"could not read SPS30 measurement values: {exc}") from exc
 
         _last_ready_at = now

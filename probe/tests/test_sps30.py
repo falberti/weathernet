@@ -1,3 +1,4 @@
+import struct
 import time
 
 import pytest
@@ -13,8 +14,15 @@ from weathernet_probe.sensors.sps30 import (
 
 
 class _FakeSps30Device:
-    """Stands in for sensirion_i2c_sps30's Sps30Device -- exposes just
-    the four methods _read_all()/_restart_measurement() actually call.
+    """Stands in for sensirion_uart_sps30's Sps30Device -- exposes just
+    the three methods _read_all()/_restart_measurement() actually call.
+
+    Unlike the I2C variant of this chip, there's no separate
+    read_data_ready_flag() on UART -- read_measurement_values_uint16()
+    itself raises struct.error when there's nothing new (confirmed
+    against the real sensirion_driver_adapters package, see sps30.py's
+    docstring on that except clause), so `ready=False` here raises
+    instead of returning a sentinel.
     """
 
     def __init__(self):
@@ -23,10 +31,9 @@ class _FakeSps30Device:
         self.start_calls = 0
         self.stop_calls = 0
 
-    def read_data_ready_flag(self):
-        return self.ready
-
     def read_measurement_values_uint16(self):
+        if not self.ready:
+            raise struct.error("unpack_from requires a buffer of at least 2 bytes")
         return self.values
 
     def start_measurement(self, output_format):
@@ -56,7 +63,7 @@ def _install_fake_device(monkeypatch, started_at, last_ready_at=None):
     # _get_device() only creates a real device when _device is None
     # (already false here) but still gates on Sps30Device (the class,
     # not the instance) being importable -- stub it too so these tests
-    # don't depend on sensirion-i2c-sps30 actually being installed.
+    # don't depend on sensirion-uart-sps30 actually being installed.
     monkeypatch.setattr(sps30, "Sps30Device", object)
     return fake
 
@@ -71,10 +78,10 @@ def _install_fake_device(monkeypatch, started_at, last_ready_at=None):
     ],
 )
 def test_sps30_sensor_instantiates_without_hardware(sensor_cls, expected_type):
-    # Instantiating must never touch hardware or the `sensirion_i2c_sps30`
+    # Instantiating must never touch hardware or the `sensirion_uart_sps30`
     # package -- only read() does. This is what lets sensors/registry.py
     # import (and every other test in this suite run) on a dev machine
-    # with no I2C bus and none of the sensirion_* packages installed.
+    # with no serial port and none of the sensirion_* packages installed.
     sensor = sensor_cls()
     assert sensor.sensor_type == expected_type
 
@@ -83,13 +90,11 @@ def test_sps30_sensor_instantiates_without_hardware(sensor_cls, expected_type):
     "sensor_cls", [SPS30PM1_0Sensor, SPS30PM2_5Sensor, SPS30PM4_0Sensor, SPS30PM10Sensor]
 )
 def test_sps30_read_fails_clearly_without_the_library_installed(sensor_cls, monkeypatch):
-    # Unlike bme680/smbus2 (Linux-only C extensions, naturally absent on
-    # a dev machine or most CI runners), the sensirion_i2c_sps30 package
-    # is pure Python and may actually be installed here -- simulate its
-    # absence explicitly rather than relying on the test environment
-    # happening to lack it.
+    # sensirion_uart_sps30 is pure Python and may actually be installed
+    # here -- simulate its absence explicitly rather than relying on
+    # the test environment happening to lack it.
     monkeypatch.setattr("weathernet_probe.sensors.sps30.Sps30Device", None)
-    with pytest.raises(SensorReadError, match="sensirion-i2c-sps30.*not installed"):
+    with pytest.raises(SensorReadError, match="sensirion-uart-sps30.*not installed"):
         sensor_cls().read()
 
 
@@ -131,9 +136,9 @@ def test_not_ready_within_stale_threshold_raises_without_restarting(monkeypatch)
 
 def test_not_ready_past_stale_threshold_restarts_measurement_mode(monkeypatch):
     # Simulates the real failure this recovery exists for: the chip
-    # silently reverted to Idle-Mode (e.g. after an internal reset from
-    # a brief brownout) and would otherwise report "not ready" forever,
-    # since this driver only calls start_measurement() once by default.
+    # silently reverted to Idle-Mode (e.g. after an internal reset) and
+    # would otherwise report "not ready" forever, since this driver
+    # only calls start_measurement() once by default.
     now = time.monotonic()
     stale_start = now - sps30._STALE_AFTER_SECONDS - sps30._WARMUP_SECONDS - 5
     fake = _install_fake_device(monkeypatch, started_at=stale_start, last_ready_at=stale_start)
