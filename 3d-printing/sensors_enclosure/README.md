@@ -26,7 +26,7 @@ imported or reused, so this isn't a derivative work under its license
 (only the specific expression of a design is copyrightable, not the
 general idea of "a two-part weatherproof sensor case" or dimensions a
 physical component dictates) -- this directory is MIT-licensed like
-the rest of the repository, same as everywhere else under `hardware/`
+the rest of the repository, same as everywhere else under `3d-printing/`
 that isn't otherwise marked. Credited here anyway as the actual
 starting inspiration, which is simply the honest thing to do.
 
@@ -44,5 +44,5 @@ starting inspiration, which is simply the honest thing to do.
   whenever the design changes -- it's a derived export, not a separate
   edit target.
 
-See `hardware/README.md` for the general file-format convention this
+See `3d-printing/README.md` for the general file-format convention this
 follows.

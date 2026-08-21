@@ -10,12 +10,12 @@ lists these as sensors a future probe should support).
 One subdirectory per physical part or assembly:
 
 ```
-hardware/
-├── S30_BM680_enclosure/
+3d-printing/
+├── sensors_enclosure/
 │   ├── README.md          -- print settings, hardware (screws/heat-inserts), assembly notes
 │   ├── case.FCStd          -- working file (parametric CAD -- see "File formats" below)
-│   ├── case.step
-│   └── case.stl
+│   ├── case.step, case.stl, case.3mf
+│   └── cover.FCStd, cover.step, cover.stl, cover.3mf
 └── anemometer/             (future)
 ```
 
@@ -30,7 +30,7 @@ Two files per printable part, not one -- but which two depends on how
 the part was actually made:
 
 - **Modeled/edited in a parametric CAD tool** (FreeCAD, Fusion 360,
-  ... -- see `S30_BM680_enclosure/`): keep the tool's native project file (e.g.
+  ... -- see `sensors_enclosure/`): keep the tool's native project file (e.g.
   `.FCStd`, `.f3d`) as the actual working file -- full parametric
   history, sketches, everything editable. Also export a **`.step`**
   (or `.stp`) alongside it, the closest thing to a universal,
@@ -57,9 +57,9 @@ equivalent of shipping a compiled binary with no source, whether the
 
 ## Licensing
 
-**The rest of this repository is MIT-licensed; parts under `hardware/`
+**The rest of this repository is MIT-licensed; parts under `3d-printing/`
 aren't necessarily.** Every part here so far *is* MIT (see each part's
-own README for why, where it matters -- `S30_BM680_enclosure/`, for instance,
+own README for why, where it matters -- `sensors_enclosure/`, for instance,
 was inspired by a CC BY-NC-SA 4.0 design but built from scratch, not
 modified from that design's own files, which is what keeps it clear of
 that license's obligations). But that won't always be true: 3D-printable

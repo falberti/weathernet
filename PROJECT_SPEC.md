@@ -331,13 +331,12 @@ weathernet/
 │   ├── schema.sql                    # the one MySQL table this needs (probe_cache)
 │   ├── .htaccess                     # blocks direct URL access to config.php / *.pem / sync.php
 │   └── README.md
-├── hardware/                          # 3D-printable enclosure/mount designs -- see 11 for licensing
+├── 3d-printing/                       # 3D-printable enclosure/mount designs -- see 11 for licensing
 │   ├── README.md                     # file-format + per-part licensing convention
-│   └── S30_BM680_enclosure/          # MIT (inspired by, not derived from, a third-party CC design)
+│   └── sensors_enclosure/            # MIT (inspired by, not derived from, a third-party CC design)
 │       ├── README.md
-│       ├── case.FCStd                 # FreeCAD source
-│       ├── case.step
-│       └── case.stl
+│       ├── case.FCStd, case.step, case.stl, case.3mf
+│       └── cover.FCStd, cover.step, cover.stl, cover.3mf
 └── docs/
     └── api-contract.md              # formal request/response schema
 ```
@@ -1644,8 +1643,8 @@ The top-level `README.md` must include, in this order:
   locking is meant to prevent, e.g. via two near-simultaneous requests in a
   test). Full test coverage is not a v1 goal.
 - **Licensing is per-directory, not automatically repo-wide, under
-  `hardware/`.** The top-level `LICENSE` (MIT) covers `server/`,
-  `probe/`, `public-page/`, and, as it happens, every `hardware/`
+  `3d-printing/`.** The top-level `LICENSE` (MIT) covers `server/`,
+  `probe/`, `public-page/`, and, as it happens, every `3d-printing/`
   subdirectory too today — but not automatically or by default.
   3D-printable designs there can easily start from someone else's
   Creative-Commons-licensed model; whether that's a licensing
@@ -1653,18 +1652,18 @@ The top-level `README.md` must include, in this order:
   that model's own files (importing/tracing/modifying its mesh) or
   just *inspired by* it (rebuilt from scratch — copyright protects the
   specific expression of a design, not the general idea, nor
-  dimensions a physical component dictates). `hardware/S30_BM680_enclosure/`
+  dimensions a physical component dictates). `3d-printing/sensors_enclosure/`
   is the latter: it started from a CC BY-NC-SA 4.0 design, but that
   design didn't fit the project's actual BME680 board, so it was
   rebuilt from scratch in FreeCAD with no geometry imported from the
   original — an independent work, not a derivative one, hence MIT
   rather than carrying the CC license forward. Before publishing any
-  new design under `hardware/` that started from someone else's work:
+  new design under `3d-printing/` that started from someone else's work:
   if it's an actual modification of their files, add a `LICENSE` file
   to that part's own subdirectory carrying their license forward
   (most CC "ShareAlike" variants and the GPL family require exactly
   that) — never assume MIT applies there by default in that case. See
-  `hardware/README.md`.
+  `3d-printing/README.md`.
 
 ## 12. Explicitly Out of Scope for v1
 
