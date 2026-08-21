@@ -95,6 +95,24 @@ def _get_device():
                 port = ShdlcSerialPort(port=_SERIAL_PORT, baudrate=_BAUDRATE, additional_response_time=0.02)
                 channel = ShdlcChannel(port)
                 device = Sps30Device(channel)
+                # The chip may be sitting in Sleep-Mode -- this driver
+                # never sends the Sleep command (0x10) itself, but the
+                # device can end up there anyway (e.g. a prior process,
+                # or just an unknown state across a probe restart), and
+                # Sleep-Mode disables the UART interface entirely, so
+                # every command below would otherwise time out with no
+                # response at all (datasheet 4.1 "Sleep"). Per 5.3.5
+                # "Wake-up": sending the Wake-up command twice in a row
+                # is the documented software-only recovery -- the first
+                # call is expected to get no response (the interface is
+                # still off when it's sent) but its transmission alone
+                # activates the interface; the second succeeds
+                # normally. Harmless if the device was already awake.
+                for _ in range(2):
+                    try:
+                        device.wake_up()
+                    except (OSError, ShdlcError):
+                        pass
                 try:
                     device.stop_measurement()
                 except (OSError, ShdlcError):

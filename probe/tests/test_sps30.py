@@ -30,6 +30,11 @@ class _FakeSps30Device:
         self.values = (1.0, 2.0, 3.0, 4.0, 0, 0, 0, 0, 0, 0)
         self.start_calls = 0
         self.stop_calls = 0
+        self.wake_up_calls = 0
+        # Simulates the real Sleep-Mode scenario: the first Wake-up
+        # gets no response (interface still off when it's sent), the
+        # second succeeds once the interface has activated.
+        self.wake_up_first_call_fails = False
 
     def read_measurement_values_uint16(self):
         if not self.ready:
@@ -41,6 +46,21 @@ class _FakeSps30Device:
 
     def stop_measurement(self):
         self.stop_calls += 1
+
+    def wake_up(self):
+        self.wake_up_calls += 1
+        if self.wake_up_calls == 1 and self.wake_up_first_call_fails:
+            raise OSError("simulated: no response (device was asleep)")
+
+
+class _DummyShdlcSerialPort:
+    def __init__(self, **kwargs):
+        pass
+
+
+class _DummyShdlcChannel:
+    def __init__(self, port):
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +104,40 @@ def test_sps30_sensor_instantiates_without_hardware(sensor_cls, expected_type):
     # with no serial port and none of the sensirion_* packages installed.
     sensor = sensor_cls()
     assert sensor.sensor_type == expected_type
+
+
+def test_get_device_wakes_up_twice_before_first_init(monkeypatch):
+    # Real-world scenario this exists for: the chip was found sitting
+    # in Sleep-Mode (fan audibly off, UART interface disabled per the
+    # datasheet) with no wiring change at all -- the documented
+    # software-only recovery is to send Wake-up twice in a row.
+    fake = _FakeSps30Device()
+    fake.wake_up_first_call_fails = True
+    monkeypatch.setattr(sps30, "Sps30Device", lambda channel: fake)
+    monkeypatch.setattr(sps30, "ShdlcSerialPort", _DummyShdlcSerialPort)
+    monkeypatch.setattr(sps30, "ShdlcChannel", _DummyShdlcChannel)
+
+    device = sps30._get_device()
+
+    assert device is fake
+    assert fake.wake_up_calls == 2  # first call got no response, second succeeded
+    assert fake.stop_calls == 1
+    assert fake.start_calls == 1
+
+
+def test_get_device_wake_up_is_harmless_when_already_awake(monkeypatch):
+    # Sending Wake-up to a device that was never asleep must not break
+    # normal initialization -- both calls just succeed as no-ops.
+    fake = _FakeSps30Device()
+    monkeypatch.setattr(sps30, "Sps30Device", lambda channel: fake)
+    monkeypatch.setattr(sps30, "ShdlcSerialPort", _DummyShdlcSerialPort)
+    monkeypatch.setattr(sps30, "ShdlcChannel", _DummyShdlcChannel)
+
+    device = sps30._get_device()
+
+    assert device is fake
+    assert fake.wake_up_calls == 2
+    assert fake.start_calls == 1
 
 
 @pytest.mark.parametrize(

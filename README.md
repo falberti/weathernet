@@ -382,6 +382,20 @@ A few things worth knowing about the SPS30 driver specifically:
   not-ready signal -- confirmed against the actual library source, not
   assumed. If you ever see an *unrelated*-looking `struct.error`
   surface elsewhere, this is the first place to check.
+- **Recovers from Sleep-Mode automatically.** If every command times
+  out with `ShdlcSerialPort timed out while waiting for response` and
+  `could not initialize SPS30 over UART` -- with no wiring change, and
+  the fan's faint hum has gone silent -- the chip is almost certainly
+  in Sleep-Mode, which disables the UART interface entirely
+  (datasheet §4.1 "Sleep"). This driver never sends the Sleep command
+  itself, but the chip can end up there regardless of what put it
+  there. Per the datasheet's own documented recovery (§5.3.5
+  "Wake-up"): sending the Wake-up command twice in a row wakes it back
+  up in software, no power cycle needed -- the first call gets no
+  response (the interface is still off when it's sent) but activates
+  it; the second succeeds normally. The driver does this automatically
+  on every fresh initialization, so this should self-heal on the next
+  reporting cycle without you doing anything.
 
 ## Reaching a probe remotely
 
