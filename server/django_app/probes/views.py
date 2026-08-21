@@ -73,23 +73,54 @@ def _air_quality_fields(pm25, pm10, gas_resistance, gas_baseline, humidity):
     }
 
 
-def _first_available(readings: dict, sensor_types: tuple):
-    """The first non-None latest-reading value among sensor_types, in
-    priority order -- e.g. BME680's generic temperature_c if present,
-    else BMP280's chip-prefixed one. None if none of them have ever
-    reported for this probe.
+def _most_recent_available(readings: dict, sensor_types: tuple):
+    """Among sensor_types, the value belonging to whichever one's own
+    latest reading is actually the most recent -- e.g. BMP280's
+    chip-prefixed temperature_c if a probe switched to it and BME680
+    hasn't reported since, even though BME680's generic sensor_type is
+    earlier in priority order. `readings` maps sensor_type -> (value,
+    time), per probe (see PublicSummaryView.get()).
+
+    This is *not* just "first non-None in priority order": that would
+    keep returning a stale value from a sensor_type the probe used to
+    report under (mock sensors and BME680 both use the generic
+    "temperature_c") forever after the probe's hardware changed to a
+    chip-prefixed one -- the old row never stops being "the latest
+    temperature_c row that ever existed" without a recency comparison,
+    which is exactly the bug this replaced. Ties (identical timestamps
+    -- realistically only in tests) fall back to priority order, since
+    that's the iteration order sensor_types is walked in.
+
+    None if none of sensor_types have ever reported for this probe.
     """
-    for sensor_type in sensor_types:
-        value = readings.get(sensor_type)
-        if value is not None:
-            return value
-    return None
+    candidates = [readings[sensor_type] for sensor_type in sensor_types if sensor_type in readings]
+    if not candidates:
+        return None
+    value, _time = max(candidates, key=lambda pair: pair[1])
+    return value
+
+
+def _latest_value(readings: dict, sensor_type: str):
+    """Single-source fields (gas_resistance_ohm, the PM sensor types)
+    have no fallback list to pick among -- just unwrap the (value,
+    time) pair _most_recent_available's callers otherwise deal with.
+    """
+    pair = readings.get(sensor_type)
+    return pair[0] if pair else None
 
 
 def _first_non_empty_series(probe_series: dict, sensor_types: tuple):
-    """Same coalescing idea as _first_available, but for a whole time
-    series: the first non-empty list among sensor_types, in priority
-    order. [] if none of them have any points in the requested window.
+    """Similar coalescing idea to _most_recent_available, but for a
+    whole time series: the first non-empty list among sensor_types, in
+    priority order. Simple existence-in-priority-order (not a recency
+    comparison like _most_recent_available needs) is correct here
+    specifically because the caller already bounds the query to a
+    fixed recent window (PublicHistoryView.get()'s `hours` param) --
+    unlike PublicSummaryView's "latest ever" query, a stale sensor_type
+    from a probe's old hardware simply won't appear in `probe_series`
+    at all once it falls outside that window, so there's no staleness
+    case to get wrong here. [] if none of them have any points in the
+    requested window.
     """
     for sensor_type in sensor_types:
         series = probe_series.get(sensor_type)
@@ -246,7 +277,7 @@ class PublicSummaryView(APIView):
             .distinct("probe_id", "sensor_type")
         )
         for reading in readings_qs:
-            latest_readings.setdefault(reading.probe_id, {})[reading.sensor_type] = reading.value
+            latest_readings.setdefault(reading.probe_id, {})[reading.sensor_type] = (reading.value, reading.time)
 
         gas_baselines = dict(
             SensorReading.objects.filter(
@@ -271,16 +302,16 @@ class PublicSummaryView(APIView):
                     "longitude": round(float(probe.location_longitude), precision),
                     "last_seen_at": probe.last_seen_at,
                     "readings": {
-                        "temperature_c": _first_available(readings, PUBLIC_TEMPERATURE_SENSOR_TYPES),
-                        "humidity_pct": _first_available(readings, PUBLIC_HUMIDITY_SENSOR_TYPES),
-                        "pressure_hpa": _first_available(readings, PUBLIC_PRESSURE_SENSOR_TYPES),
-                        "gas_resistance_ohm": readings.get("gas_resistance_ohm"),
+                        "temperature_c": _most_recent_available(readings, PUBLIC_TEMPERATURE_SENSOR_TYPES),
+                        "humidity_pct": _most_recent_available(readings, PUBLIC_HUMIDITY_SENSOR_TYPES),
+                        "pressure_hpa": _most_recent_available(readings, PUBLIC_PRESSURE_SENSOR_TYPES),
+                        "gas_resistance_ohm": _latest_value(readings, "gas_resistance_ohm"),
                         **_air_quality_fields(
-                            readings.get(PM25_SENSOR_TYPE),
-                            readings.get(PM10_SENSOR_TYPE),
-                            readings.get("gas_resistance_ohm"),
+                            _latest_value(readings, PM25_SENSOR_TYPE),
+                            _latest_value(readings, PM10_SENSOR_TYPE),
+                            _latest_value(readings, "gas_resistance_ohm"),
                             gas_baselines.get(probe.id),
-                            _first_available(readings, PUBLIC_HUMIDITY_SENSOR_TYPES),
+                            _most_recent_available(readings, PUBLIC_HUMIDITY_SENSOR_TYPES),
                         ),
                     },
                 }

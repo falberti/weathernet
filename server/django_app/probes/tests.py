@@ -439,7 +439,10 @@ class PublicSummaryViewTests(PublicApiTestBase, TestCase):
         readings = response.json()["probes"][0]["readings"]
         self.assertEqual(readings["air_quality_index"], compute_air_quality_index(50000, 50000, 40))
 
-    def test_bme680_reading_preferred_over_bmp280_when_both_present(self):
+    def test_bme680_reading_preferred_over_bmp280_when_both_equally_fresh(self):
+        # Same timestamp for both -- BME680 wins the tie by priority
+        # order, since that's what its position in
+        # PUBLIC_TEMPERATURE_SENSOR_TYPES otherwise means.
         probe = self._make_probe()
         now = timezone.now()
         SensorReading.objects.create(probe=probe, sensor_type="temperature_c", value=20.0, time=now)
@@ -447,6 +450,24 @@ class PublicSummaryViewTests(PublicApiTestBase, TestCase):
 
         response = self._get()
         self.assertEqual(response.json()["probes"][0]["readings"]["temperature_c"], 20.0)
+
+    def test_more_recent_bmp280_reading_wins_over_stale_bme680_one(self):
+        # A probe that used to report BME680's generic temperature_c
+        # (or mock_temperature, which uses the same sensor_type) and
+        # was later rewired to BMP280/HTU21D-F must show the *current*
+        # reading, not the old BME680 one forever just because it's
+        # first in priority order and this "latest ever" query has no
+        # time bound of its own. Real bug, hit in practice -- not a
+        # hypothetical edge case.
+        probe = self._make_probe()
+        now = timezone.now()
+        SensorReading.objects.create(
+            probe=probe, sensor_type="temperature_c", value=20.0, time=now - timedelta(days=30)
+        )
+        SensorReading.objects.create(probe=probe, sensor_type="bmp280_temperature_c", value=25.0, time=now)
+
+        response = self._get()
+        self.assertEqual(response.json()["probes"][0]["readings"]["temperature_c"], 25.0)
 
     def test_bmp280_and_htu21d_used_as_fallback_when_bme680_absent(self):
         # A probe with only the newer sensors (no BME680, and no SPS30
