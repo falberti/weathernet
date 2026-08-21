@@ -1,5 +1,8 @@
+import time
+
 import pytest
 
+from weathernet_probe.sensors import sps30
 from weathernet_probe.sensors.base import SensorReadError
 from weathernet_probe.sensors.sps30 import (
     SPS30PM1_0Sensor,
@@ -7,6 +10,55 @@ from weathernet_probe.sensors.sps30 import (
     SPS30PM4_0Sensor,
     SPS30PM10Sensor,
 )
+
+
+class _FakeSps30Device:
+    """Stands in for sensirion_i2c_sps30's Sps30Device -- exposes just
+    the four methods _read_all()/_restart_measurement() actually call.
+    """
+
+    def __init__(self):
+        self.ready = True
+        self.values = (1.0, 2.0, 3.0, 4.0, 0, 0, 0, 0, 0, 0)
+        self.start_calls = 0
+        self.stop_calls = 0
+
+    def read_data_ready_flag(self):
+        return self.ready
+
+    def read_measurement_values_uint16(self):
+        return self.values
+
+    def start_measurement(self, output_format):
+        self.start_calls += 1
+
+    def stop_measurement(self):
+        self.stop_calls += 1
+
+
+@pytest.fixture(autouse=True)
+def _reset_sps30_module_state(monkeypatch):
+    # Module-level singleton state (see sps30.py's docstring on _device)
+    # -- reset around every test so they don't leak into each other;
+    # in the real process this state is naturally fresh per-run.
+    monkeypatch.setattr(sps30, "_device", None)
+    monkeypatch.setattr(sps30, "_measurement_started_at", None)
+    monkeypatch.setattr(sps30, "_last_ready_at", None)
+    monkeypatch.setattr(sps30, "_cached_values", None)
+    monkeypatch.setattr(sps30, "_cached_at", 0.0)
+
+
+def _install_fake_device(monkeypatch, started_at, last_ready_at=None):
+    fake = _FakeSps30Device()
+    monkeypatch.setattr(sps30, "_device", fake)
+    monkeypatch.setattr(sps30, "_measurement_started_at", started_at)
+    monkeypatch.setattr(sps30, "_last_ready_at", started_at if last_ready_at is None else last_ready_at)
+    # _get_device() only creates a real device when _device is None
+    # (already false here) but still gates on Sps30Device (the class,
+    # not the instance) being importable -- stub it too so these tests
+    # don't depend on sensirion-i2c-sps30 actually being installed.
+    monkeypatch.setattr(sps30, "Sps30Device", object)
+    return fake
 
 
 @pytest.mark.parametrize(
@@ -39,3 +91,60 @@ def test_sps30_read_fails_clearly_without_the_library_installed(sensor_cls, monk
     monkeypatch.setattr("weathernet_probe.sensors.sps30.Sps30Device", None)
     with pytest.raises(SensorReadError, match="sensirion-i2c-sps30.*not installed"):
         sensor_cls().read()
+
+
+def test_still_warming_up_raises_before_checking_ready(monkeypatch):
+    now = time.monotonic()
+    fake = _install_fake_device(monkeypatch, started_at=now)
+    with pytest.raises(SensorReadError, match="still warming up"):
+        sps30._read_all()
+    assert fake.start_calls == 0  # never even asked the device anything yet
+
+
+def test_read_all_returns_values_once_warmed_up_and_ready(monkeypatch):
+    now = time.monotonic()
+    _install_fake_device(monkeypatch, started_at=now - sps30._WARMUP_SECONDS - 1)
+    assert sps30._read_all() == (1.0, 2.0, 3.0, 4.0)
+
+
+def test_second_read_within_cache_ttl_reuses_cached_values(monkeypatch):
+    now = time.monotonic()
+    fake = _install_fake_device(monkeypatch, started_at=now - sps30._WARMUP_SECONDS - 1)
+    first = sps30._read_all()
+    fake.values = (99.0, 99.0, 99.0, 99.0, 0, 0, 0, 0, 0, 0)  # would differ if actually re-read
+    second = sps30._read_all()
+    assert first == second == (1.0, 2.0, 3.0, 4.0)
+
+
+def test_not_ready_within_stale_threshold_raises_without_restarting(monkeypatch):
+    # A single missed cycle shortly after startup/the last good read is
+    # normal (the chip may just not have produced a fresh sample yet) --
+    # must not trigger a measurement-mode restart every time.
+    now = time.monotonic()
+    fake = _install_fake_device(monkeypatch, started_at=now - sps30._WARMUP_SECONDS - 1)
+    fake.ready = False
+    with pytest.raises(SensorReadError, match="did not return fresh data this cycle"):
+        sps30._read_all()
+    assert fake.start_calls == 0
+    assert fake.stop_calls == 0
+
+
+def test_not_ready_past_stale_threshold_restarts_measurement_mode(monkeypatch):
+    # Simulates the real failure this recovery exists for: the chip
+    # silently reverted to Idle-Mode (e.g. after an internal reset from
+    # a brief brownout) and would otherwise report "not ready" forever,
+    # since this driver only calls start_measurement() once by default.
+    now = time.monotonic()
+    stale_start = now - sps30._STALE_AFTER_SECONDS - sps30._WARMUP_SECONDS - 5
+    fake = _install_fake_device(monkeypatch, started_at=stale_start, last_ready_at=stale_start)
+    fake.ready = False
+
+    with pytest.raises(SensorReadError, match="silently reset to Idle-Mode"):
+        sps30._read_all()
+
+    assert fake.stop_calls == 1
+    assert fake.start_calls == 1
+    # The warmup/staleness clocks must be reset so the very next read
+    # goes through a fresh warmup window rather than immediately
+    # re-triggering another "restart" on top of the one just done.
+    assert sps30._measurement_started_at == pytest.approx(time.monotonic(), abs=1.0)

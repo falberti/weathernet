@@ -39,11 +39,23 @@ _I2C_ADDRESS = 0x69
 _device = None
 _device_lock = threading.Lock()
 _measurement_started_at = None
+_last_ready_at = None
 
 # The SPS30's fan needs to physically spin up and the airflow needs to
 # stabilize before mass-concentration readings are trustworthy -- this
 # is normal, not a fault (Sensirion's datasheet gives ~8s; padded here).
 _WARMUP_SECONDS = 10
+
+# If the chip goes this long without producing fresh data -- well past
+# the ~1s cadence the datasheet promises in continuous Measurement-Mode,
+# but short enough to recover within the next reporting cycle regardless
+# of report_interval_seconds -- assume it silently reverted to
+# Idle-Mode (e.g. after an internal reset caused by a brief brownout
+# that wasn't enough to drop it off I2C entirely; this driver only ever
+# calls start_measurement() once, at process start, so it would
+# otherwise have no way to notice and would report "not ready" forever)
+# and re-issue start_measurement() to recover automatically.
+_STALE_AFTER_SECONDS = 30
 
 # The chip only produces a new sample about once a second (in
 # continuous Measurement-Mode); caching a read for a couple of seconds
@@ -55,7 +67,7 @@ _cached_at = 0.0
 
 
 def _get_device():
-    global _device, _measurement_started_at
+    global _device, _measurement_started_at, _last_ready_at
     if Sps30Device is None:
         raise SensorReadError(
             "the 'sensirion-i2c-sps30' package (and its sensirion-i2c-driver / "
@@ -77,11 +89,31 @@ def _get_device():
                 raise SensorReadError(f"could not initialize SPS30 over I2C: {exc}") from exc
             _device = device
             _measurement_started_at = time.monotonic()
+            _last_ready_at = _measurement_started_at
         return _device
 
 
+def _restart_measurement(device):
+    """Recovery for a device that appears to have silently reverted to
+    Idle-Mode -- see _STALE_AFTER_SECONDS above. stop_measurement()
+    first because start_measurement() only succeeds from Idle-Mode, and
+    stopping is safe/a no-op if it's already there; if the device was
+    actually still in Measurement-Mode and just slow, this briefly
+    interrupts it, which is harmless.
+    """
+    global _measurement_started_at, _last_ready_at
+    try:
+        device.stop_measurement()
+    except OSError:
+        pass
+    device.start_measurement(OutputFormat.OUTPUT_FORMAT_UINT16)
+    now = time.monotonic()
+    _measurement_started_at = now
+    _last_ready_at = now
+
+
 def _read_all():
-    global _cached_values, _cached_at
+    global _cached_values, _cached_at, _last_ready_at
     device = _get_device()
     with _device_lock:
         now = time.monotonic()
@@ -98,7 +130,17 @@ def _read_all():
             ready = device.read_data_ready_flag()
         except OSError as exc:
             raise SensorReadError(f"could not read SPS30 data-ready flag: {exc}") from exc
+
         if not ready:
+            if (now - _last_ready_at) > _STALE_AFTER_SECONDS:
+                try:
+                    _restart_measurement(device)
+                except OSError as exc:
+                    raise SensorReadError(f"could not restart SPS30 measurement mode: {exc}") from exc
+                raise SensorReadError(
+                    f"SPS30 had no fresh data for over {_STALE_AFTER_SECONDS}s -- it may have "
+                    "silently reset to Idle-Mode; re-issued start_measurement(), retrying warm-up"
+                )
             raise SensorReadError("SPS30 did not return fresh data this cycle")
 
         try:
@@ -106,6 +148,7 @@ def _read_all():
         except OSError as exc:
             raise SensorReadError(f"could not read SPS30 measurement values: {exc}") from exc
 
+        _last_ready_at = now
         _cached_values = (mc_1p0, mc_2p5, mc_4p0, mc_10p0)
         _cached_at = now
         return _cached_values

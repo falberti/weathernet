@@ -315,6 +315,20 @@ A few things worth knowing about how these three differ from BME680:
   cached reading per cycle** (like BME680's four sensors do), since the
   chip only produces a new sample about once a second regardless of how
   many of the four are configured.
+- **SPS30 self-recovers from a silent reset.** This driver only calls
+  `start_measurement()` once, at process start -- if the chip's
+  internal state ever gets reset without dropping off I2C long enough
+  to notice (e.g. a brief brownout that wasn't quite enough to fail
+  `i2cdetect`, but was enough to bounce the chip back to Idle-Mode), it
+  would otherwise report "not ready" forever, since Idle-Mode never
+  produces new samples on its own. If no fresh data has arrived for
+  over 30s, the driver re-issues `start_measurement()` automatically
+  and logs `SPS30 had no fresh data for over 30s -- it may have
+  silently reset to Idle-Mode; re-issued start_measurement()`. Seeing
+  this occasionally (e.g. around a power event) is the recovery
+  working as intended, not a fault to chase; seeing it constantly
+  points back to the power-supply checks in the SPS30 wiring notes
+  above.
 
 ## Reaching a probe remotely
 
