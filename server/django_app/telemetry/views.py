@@ -69,6 +69,8 @@ class IngestView(APIView):
                 mem_percent=health["mem_percent"],
                 disk_percent=health["disk_percent"],
                 uptime_seconds=health["uptime_seconds"],
+                undervoltage_now=health["undervoltage_now"],
+                undervoltage_occurred=health["undervoltage_occurred"],
             )
             probe.last_seen_at = timezone.now()
             probe.last_health_summary = {
@@ -77,6 +79,8 @@ class IngestView(APIView):
                 "mem_percent": health["mem_percent"],
                 "disk_percent": health["disk_percent"],
                 "uptime_seconds": health["uptime_seconds"],
+                "undervoltage_now": health["undervoltage_now"],
+                "undervoltage_occurred": health["undervoltage_occurred"],
             }
             probe.save(update_fields=["last_seen_at", "last_health_summary"])
 

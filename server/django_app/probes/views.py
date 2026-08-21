@@ -16,13 +16,23 @@ from telemetry.models import SensorReading
 from . import ca, ssh
 from .aqi import compute_air_quality_index
 from .models import EnrollmentToken, Probe
+from .sensor_fallback import ALL_SENSOR_TYPES as PUBLIC_SUMMARY_SENSOR_TYPES
+from .sensor_fallback import HUMIDITY_SENSOR_TYPES as PUBLIC_HUMIDITY_SENSOR_TYPES
+from .sensor_fallback import PRESSURE_SENSOR_TYPES as PUBLIC_PRESSURE_SENSOR_TYPES
+from .sensor_fallback import TEMPERATURE_SENSOR_TYPES as PUBLIC_TEMPERATURE_SENSOR_TYPES
 from .serializers import EnrollRequestSerializer
-from .wireguard import SubnetExhaustedError, allocate_tunnel_ip, read_server_public_key, server_tunnel_ip
+from .wireguard import (
+    SubnetExhaustedError,
+    allocate_tunnel_ip,
+    read_server_public_key,
+    server_tunnel_ip,
+)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_REPORT_INTERVAL_SECONDS = 300
-PUBLIC_SUMMARY_SENSOR_TYPES = ("temperature_c", "humidity_pct", "pressure_hpa", "gas_resistance_ohm")
+# See sensor_fallback.py for what these mean and why BME680 is
+# preferred over the newer chip-specific sensors when both exist.
 PUBLIC_SUMMARY_GAS_BASELINE_WINDOW = timedelta(days=7)
 PUBLIC_HISTORY_DEFAULT_HOURS = 24
 PUBLIC_HISTORY_MAX_HOURS = 168  # 7 days -- a public, keyed-but-not-per-request-limited
@@ -43,6 +53,31 @@ def _check_public_api_key(request):
     if not configured_key or not hmac.compare_digest(provided_key, configured_key):
         return Response({"detail": "invalid or missing API key"}, status=401)
     return None
+
+
+def _first_available(readings: dict, sensor_types: tuple):
+    """The first non-None latest-reading value among sensor_types, in
+    priority order -- e.g. BME680's generic temperature_c if present,
+    else BMP280's chip-prefixed one. None if none of them have ever
+    reported for this probe.
+    """
+    for sensor_type in sensor_types:
+        value = readings.get(sensor_type)
+        if value is not None:
+            return value
+    return None
+
+
+def _first_non_empty_series(probe_series: dict, sensor_types: tuple):
+    """Same coalescing idea as _first_available, but for a whole time
+    series: the first non-empty list among sensor_types, in priority
+    order. [] if none of them have any points in the requested window.
+    """
+    for sensor_type in sensor_types:
+        series = probe_series.get(sensor_type)
+        if series:
+            return series
+    return []
 
 
 def _public_probes_queryset():
@@ -216,14 +251,14 @@ class PublicSummaryView(APIView):
                     "longitude": round(float(probe.location_longitude), precision),
                     "last_seen_at": probe.last_seen_at,
                     "readings": {
-                        "temperature_c": readings.get("temperature_c"),
-                        "humidity_pct": readings.get("humidity_pct"),
-                        "pressure_hpa": readings.get("pressure_hpa"),
+                        "temperature_c": _first_available(readings, PUBLIC_TEMPERATURE_SENSOR_TYPES),
+                        "humidity_pct": _first_available(readings, PUBLIC_HUMIDITY_SENSOR_TYPES),
+                        "pressure_hpa": _first_available(readings, PUBLIC_PRESSURE_SENSOR_TYPES),
                         "gas_resistance_ohm": readings.get("gas_resistance_ohm"),
                         "air_quality_index": compute_air_quality_index(
                             readings.get("gas_resistance_ohm"),
                             gas_baselines.get(probe.id),
-                            readings.get("humidity_pct"),
+                            _first_available(readings, PUBLIC_HUMIDITY_SENSOR_TYPES),
                         ),
                     },
                 }
@@ -278,14 +313,19 @@ class PublicHistoryView(APIView):
             probe_series = series_by_probe.setdefault(reading["probe_id"], {t: [] for t in PUBLIC_SUMMARY_SENSOR_TYPES})
             probe_series[reading["sensor_type"]].append({"time": reading["time"], "value": reading["value"]})
 
-        payload = [
-            {
-                "name": probe.name,
-                "series": series_by_probe.get(
-                    probe.id, {sensor_type: [] for sensor_type in PUBLIC_SUMMARY_SENSOR_TYPES}
-                ),
-            }
-            for probe in probes
-        ]
+        payload = []
+        for probe in probes:
+            probe_series = series_by_probe.get(probe.id, {})
+            payload.append(
+                {
+                    "name": probe.name,
+                    "series": {
+                        "temperature_c": _first_non_empty_series(probe_series, PUBLIC_TEMPERATURE_SENSOR_TYPES),
+                        "humidity_pct": _first_non_empty_series(probe_series, PUBLIC_HUMIDITY_SENSOR_TYPES),
+                        "pressure_hpa": _first_non_empty_series(probe_series, PUBLIC_PRESSURE_SENSOR_TYPES),
+                        "gas_resistance_ohm": probe_series.get("gas_resistance_ohm", []),
+                    },
+                }
+            )
 
         return Response({"generated_at": timezone.now(), "window_hours": hours, "probes": payload})

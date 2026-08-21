@@ -55,6 +55,34 @@ class IngestViewTests(TestCase):
         self.assertIsNotNone(self.probe.last_seen_at)
         self.assertEqual(self.probe.last_health_summary["cpu_percent"], 12.5)
 
+    def test_payload_without_undervoltage_fields_is_still_accepted(self):
+        # VALID_PAYLOAD above has no undervoltage_now/undervoltage_occurred
+        # keys at all -- this is what an old, not-yet-updated probe (or
+        # any non-Pi probe without vcgencmd) actually sends. Must not
+        # 400 just because a field was added to the contract later.
+        response = self.post(self._payload(self.probe.id), cn=str(self.probe.id))
+        self.assertEqual(response.status_code, 201)
+
+        health = self.probe.health_reports.get()
+        self.assertIsNone(health.undervoltage_now)
+        self.assertIsNone(health.undervoltage_occurred)
+
+    def test_undervoltage_fields_are_stored_when_present(self):
+        payload = self._payload(self.probe.id)
+        payload["health"]["undervoltage_now"] = True
+        payload["health"]["undervoltage_occurred"] = True
+
+        response = self.post(payload, cn=str(self.probe.id))
+        self.assertEqual(response.status_code, 201)
+
+        health = self.probe.health_reports.get()
+        self.assertTrue(health.undervoltage_now)
+        self.assertTrue(health.undervoltage_occurred)
+
+        self.probe.refresh_from_db()
+        self.assertTrue(self.probe.last_health_summary["undervoltage_now"])
+        self.assertTrue(self.probe.last_health_summary["undervoltage_occurred"])
+
     def test_missing_cert_header_is_rejected(self):
         response = self.client.post(
             self.url,

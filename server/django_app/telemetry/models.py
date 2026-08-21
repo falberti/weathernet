@@ -36,3 +36,11 @@ class ProbeHealth(models.Model):
     mem_percent = models.FloatField()
     disk_percent = models.FloatField()
     uptime_seconds = models.BigIntegerField()
+    # From `vcgencmd get_throttled` on the probe (weathernet_probe/health.py)
+    # -- null on non-Pi hardware or if vcgencmd isn't available, same
+    # convention as cpu_temp_c above. `_occurred` is sticky since the
+    # probe's last reboot: a brief brownout (e.g. a sensor's fan inrush
+    # current sagging the Pi's own 5V rail) between two reporting
+    # cycles would very likely be missed by `_now` alone.
+    undervoltage_now = models.BooleanField(null=True, blank=True)
+    undervoltage_occurred = models.BooleanField(null=True, blank=True)

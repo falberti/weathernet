@@ -461,7 +461,10 @@ Two apps:
 - `last_seen_at` — nullable datetime, updated on every successful ingest.
 - `last_health_summary` — nullable JSON field, updated on every successful
   ingest with the most recent health payload (cpu_temp_c, cpu_percent,
-  mem_percent, disk_percent, uptime_seconds). This lets Django Admin show
+  mem_percent, disk_percent, uptime_seconds, undervoltage_now,
+  undervoltage_occurred -- the last two from `vcgencmd get_throttled` on
+  the probe, null on non-Pi hardware; see Section 7 and
+  `weathernet_probe/health.py`). This lets Django Admin show
   probe health at a glance with a single indexed lookup, instead of
   querying the (much larger) hypertable for the latest row every time the
   admin list page renders.
@@ -535,7 +538,12 @@ Two regular Django models, promoted to hypertables via a migration:
   (FK to `Probe`), `sensor_type` (str), `value` (float), `unit` (str,
   nullable).
 - `ProbeHealth` — fields: `time`, `probe` (FK), `cpu_temp_c`, `cpu_percent`,
-  `mem_percent`, `disk_percent`, `uptime_seconds`.
+  `mem_percent`, `disk_percent`, `uptime_seconds`, `undervoltage_now`,
+  `undervoltage_occurred` (the last two nullable booleans, from
+  `vcgencmd get_throttled` on the probe -- see Section 7 and
+  `weathernet_probe/health.py`; added after a real incident where a
+  sensor's fan startup current sagged the Pi's own 5V rail enough to
+  knock it off I2C).
 
 Implementation notes for whoever writes the migrations:
 
@@ -1006,8 +1014,14 @@ probe within range: query `SensorReading` for that probe over
 min/max/avg temperature, avg humidity, min/max/avg pressure, and the
 same heuristic air quality score used elsewhere (`probes/aqi.py`,
 Section 7.3) from avg gas resistance against a 7-day rolling baseline.
-Missing data for any one field renders as "n/d" in the message rather
-than failing the whole send. The **first** time a subscription's
+Temperature/humidity/pressure use the same chip-fallback policy as the
+public API (`probes/sensor_fallback.py`, shared by both rather than
+duplicated): BME680's generic `sensor_type` is preferred when a probe
+has it, falling back to BMP280/HTU21D-F's chip-prefixed ones so a probe
+without BME680 still gets a real digest instead of every field reading
+"n/d". No fallback exists for the gas/AQI figure -- there's no
+equivalent sensor on the fallback chips. Missing data for any one field
+renders as "n/d" in the message rather than failing the whole send. The **first** time a subscription's
 `probe_ever_found` flips to `True` during a digest run, the message
 gets an extra "a probe is now in range" line ahead of the regular
 summary — the alert the original feature request specifically asked
@@ -1279,10 +1293,19 @@ Request body:
     "cpu_percent": 12.5,
     "mem_percent": 34.0,
     "disk_percent": 21.0,
-    "uptime_seconds": 903421
+    "uptime_seconds": 903421,
+    "undervoltage_now": false,
+    "undervoltage_occurred": false
   }
 }
 ```
+
+`health.undervoltage_now`/`undervoltage_occurred` (from `vcgencmd
+get_throttled` on the probe, `weathernet_probe/health.py`) are optional
+fields, not just nullable ones — added after probes were already
+reporting in the field, so a not-yet-updated probe's payload (with no
+knowledge of these keys at all) must still validate rather than `400`.
+`null`/absent on non-Pi hardware or if `vcgencmd` itself is unavailable.
 
 `probe_id` in the body must match `X-Client-Cert-CN` — reject with `403` if
 they differ (a probe must not be able to report data under another probe's
@@ -1340,6 +1363,15 @@ a real calibrated IAQ needs Bosch's proprietary BSEC library, out of
 scope (see Section 12 and `probe/weathernet_probe/sensors/bme680.py`).
 `null` for any reading/score not yet available for a probe.
 
+`temperature_c`/`humidity_pct`/`pressure_hpa` are resolved through the
+same chip-fallback policy as the Telegram digest (`probes/sensor_
+fallback.py`, shared by both): BME680's generic `sensor_type` first if
+the probe has it, else BMP280/HTU21D-F's chip-prefixed equivalent. A
+probe with only the newer sensors still gets real readings here, not
+`null` across the board — but `gas_resistance_ohm`/`air_quality_index`
+have no such fallback, since no equivalent of BME680's gas sensor
+exists on the others.
+
 **Never included, by design, however the response shape evolves**:
 `location_address`, `owner_email`, `owner_phone`. These exist on
 `Probe` for internal/admin use only.
@@ -1377,8 +1409,11 @@ Response `200`:
 }
 ```
 
-Same probe eligibility as 7.3. Every sensor type is always present in
-`series`, as `[]` if there's no reading of that type in the window —
+Same probe eligibility as 7.3, including the same chip-fallback policy
+for `temperature_c`/`humidity_pct`/`pressure_hpa` (per-probe: BME680's
+series if it has any points in the window, else the fallback chip's).
+Every one of these 4 canonical keys is always present in `series`, as
+`[]` if neither it nor its fallback has a reading in the window —
 callers shouldn't need to guess which keys might be missing. Points
 ordered oldest to newest. No `air_quality_index` here: it's relative
 to a baseline computed as of "now" (`probes/aqi.py`), so there's no

@@ -16,7 +16,6 @@ from telemetry.models import SensorReading
 
 from .aqi import compute_air_quality_index
 from .models import EnrollmentToken, Probe
-from .views import PUBLIC_SUMMARY_SENSOR_TYPES
 
 
 def _generate_csr_pem(common_name="ignored-by-server"):
@@ -369,6 +368,35 @@ class PublicSummaryViewTests(PublicApiTestBase, TestCase):
         readings = response.json()["probes"][0]["readings"]
         self.assertEqual(readings["air_quality_index"], compute_air_quality_index(50000, 50000, 40))
 
+    def test_bme680_reading_preferred_over_bmp280_when_both_present(self):
+        probe = self._make_probe()
+        now = timezone.now()
+        SensorReading.objects.create(probe=probe, sensor_type="temperature_c", value=20.0, time=now)
+        SensorReading.objects.create(probe=probe, sensor_type="bmp280_temperature_c", value=99.0, time=now)
+
+        response = self._get()
+        self.assertEqual(response.json()["probes"][0]["readings"]["temperature_c"], 20.0)
+
+    def test_bmp280_and_htu21d_used_as_fallback_when_bme680_absent(self):
+        # A probe with only the newer sensors (no BME680) -- the public
+        # API shouldn't need to know or care which hardware combination
+        # is actually attached. No gas_resistance_ohm/AQI equivalent
+        # exists on these, so both stay null, same as before a real
+        # sensor was ever attached.
+        probe = self._make_probe()
+        now = timezone.now()
+        SensorReading.objects.create(probe=probe, sensor_type="bmp280_temperature_c", value=19.5, time=now)
+        SensorReading.objects.create(probe=probe, sensor_type="bmp280_pressure_hpa", value=1013.0, time=now)
+        SensorReading.objects.create(probe=probe, sensor_type="htu21d_humidity_pct", value=55.0, time=now)
+
+        response = self._get()
+        readings = response.json()["probes"][0]["readings"]
+        self.assertEqual(readings["temperature_c"], 19.5)
+        self.assertEqual(readings["pressure_hpa"], 1013.0)
+        self.assertEqual(readings["humidity_pct"], 55.0)
+        self.assertIsNone(readings["gas_resistance_ohm"])
+        self.assertIsNone(readings["air_quality_index"])
+
 
 @override_settings(PUBLIC_SUMMARY_API_KEY="test-summary-key")
 class PublicHistoryViewTests(PublicApiTestBase, TestCase):
@@ -401,11 +429,41 @@ class PublicHistoryViewTests(PublicApiTestBase, TestCase):
         temps = [point["value"] for point in body["series"]["temperature_c"]]
         self.assertEqual(temps, [20.0, 21.0])
 
-    def test_every_configured_sensor_type_present_even_when_empty(self):
+    def test_every_canonical_field_present_even_when_empty(self):
+        # The response always exposes these 4 canonical field names --
+        # PUBLIC_SUMMARY_SENSOR_TYPES (the underlying sensor_type
+        # strings the query considers, including the chip-prefixed
+        # BMP280/HTU21D-F ones) is an internal query detail, not the
+        # response shape. See the fallback tests below.
         self._make_probe()
         response = self._get()
         series = response.json()["probes"][0]["series"]
-        self.assertEqual(set(series.keys()), set(PUBLIC_SUMMARY_SENSOR_TYPES))
+        self.assertEqual(set(series.keys()), {"temperature_c", "humidity_pct", "pressure_hpa", "gas_resistance_ohm"})
+        self.assertEqual(series["gas_resistance_ohm"], [])
+
+    def test_bme680_series_preferred_over_bmp280_when_both_present(self):
+        probe = self._make_probe()
+        now = timezone.now()
+        SensorReading.objects.create(probe=probe, sensor_type="temperature_c", value=20.0, time=now)
+        SensorReading.objects.create(probe=probe, sensor_type="bmp280_temperature_c", value=99.0, time=now)
+
+        response = self._get()
+        temps = [point["value"] for point in response.json()["probes"][0]["series"]["temperature_c"]]
+        self.assertEqual(temps, [20.0])
+
+    def test_bmp280_and_htu21d_series_used_as_fallback_when_bme680_absent(self):
+        probe = self._make_probe()
+        now = timezone.now()
+        SensorReading.objects.create(probe=probe, sensor_type="bmp280_temperature_c", value=19.5, time=now)
+        SensorReading.objects.create(probe=probe, sensor_type="bmp280_pressure_hpa", value=1013.0, time=now)
+        SensorReading.objects.create(probe=probe, sensor_type="htu21d_humidity_pct", value=55.0, time=now)
+
+        response = self._get()
+        series = response.json()["probes"][0]["series"]
+        self.assertEqual([p["value"] for p in series["temperature_c"]], [19.5])
+        self.assertEqual([p["value"] for p in series["pressure_hpa"]], [1013.0])
+        self.assertEqual([p["value"] for p in series["humidity_pct"]], [55.0])
+        # No BME680 gas sensor equivalent exists on the fallback chips.
         self.assertEqual(series["gas_resistance_ohm"], [])
 
     def test_hours_param_narrows_the_window(self):

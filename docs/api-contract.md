@@ -112,7 +112,9 @@ and nginx overwrites any client-supplied value for it.
     "cpu_percent": 12.5,
     "mem_percent": 34.0,
     "disk_percent": 21.0,
-    "uptime_seconds": 903421
+    "uptime_seconds": 903421,
+    "undervoltage_now": false,
+    "undervoltage_occurred": false
   }
 }
 ```
@@ -129,6 +131,8 @@ and nginx overwrites any client-supplied value for it.
 | `health.mem_percent`     | float                 |                                                  |
 | `health.disk_percent`    | float                 | Root filesystem.                                |
 | `health.uptime_seconds`  | integer               | Seconds since the probe daemon started (not OS uptime). |
+| `health.undervoltage_now` | boolean or `null`, optional | From `vcgencmd get_throttled` bit 0. `null` on non-Pi hardware or if `vcgencmd` is unavailable. Optional field -- omitted entirely by probes running older code; the server defaults it to `null`. |
+| `health.undervoltage_occurred` | boolean or `null`, optional | Same source, bit 16 -- sticky since the probe's last reboot, so it catches a brief brownout (e.g. a sensor's fan inrush current) that `undervoltage_now` would likely miss between two reporting cycles. |
 
 ### Validation and identity checks (in order)
 

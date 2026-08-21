@@ -325,6 +325,52 @@ class SendDailyDigestTests(TestCase):
         self.assertIn("n/d", mock_send.call_args[0][1])
 
     @patch("subscriptions.management.commands.send_daily_digest.send_message")
+    def test_bme680_preferred_over_bmp280_when_both_present(self, mock_send):
+        probe = _create_probe_with_yesterday_readings()
+        yesterday = timezone.localtime(timezone.now()).date() - datetime.timedelta(days=1)
+        base = timezone.make_aware(datetime.datetime.combine(yesterday, datetime.time(12, 0)))
+        # A BMP280 reading present alongside BME680's -- must not
+        # affect the aggregate, since BME680 is preferred.
+        SensorReading.objects.create(probe=probe, sensor_type="bmp280_temperature_c", value=99.0, time=base)
+        WeatherSubscription.objects.create(
+            chat_id=1, query_text="q", place_label="Milano", latitude="45.4650", longitude="9.1910"
+        )
+
+        call_command("send_daily_digest")
+
+        text = mock_send.call_args[0][1]
+        self.assertIn("min 20.0°C", text)
+        self.assertIn("max 24.0°C", text)
+        self.assertNotIn("99.0", text)
+
+    @patch("subscriptions.management.commands.send_daily_digest.send_message")
+    def test_bmp280_and_htu21d_used_as_fallback_when_bme680_absent(self, mock_send):
+        # A probe with only the newer sensors -- no temperature_c,
+        # humidity_pct, or pressure_hpa readings at all -- must still
+        # get a real digest instead of every field rendering "n/d".
+        probe = Probe.objects.create(
+            name="p", hardware_type=Probe.HardwareType.RASPBERRY_PI_3,
+            location_latitude="45.46", location_longitude="9.19", is_active=True,
+        )
+        yesterday = timezone.localtime(timezone.now()).date() - datetime.timedelta(days=1)
+        base = timezone.make_aware(datetime.datetime.combine(yesterday, datetime.time(12, 0)))
+        SensorReading.objects.create(probe=probe, sensor_type="bmp280_temperature_c", value=19.5, time=base)
+        SensorReading.objects.create(probe=probe, sensor_type="bmp280_pressure_hpa", value=1013.0, time=base)
+        SensorReading.objects.create(probe=probe, sensor_type="htu21d_humidity_pct", value=55.0, time=base)
+        WeatherSubscription.objects.create(
+            chat_id=1, query_text="q", place_label="Milano", latitude="45.4650", longitude="9.1910"
+        )
+
+        call_command("send_daily_digest")
+
+        text = mock_send.call_args[0][1]
+        self.assertIn("min 19.5°C", text)
+        self.assertIn("max 19.5°C", text)
+        self.assertIn("55%", text)
+        self.assertIn("1013 hPa", text)
+        self.assertIn("Qualità aria: n/d", text)  # no BME680 gas sensor -> no AQI
+
+    @patch("subscriptions.management.commands.send_daily_digest.send_message")
     def test_readings_from_two_days_ago_are_not_counted(self, mock_send):
         probe = Probe.objects.create(
             name="p", hardware_type=Probe.HardwareType.RASPBERRY_PI_3,

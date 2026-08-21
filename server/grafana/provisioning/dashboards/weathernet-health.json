@@ -5,7 +5,7 @@
   "tags": ["weathernet"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "1m",
   "time": { "from": "now-24h", "to": "now" },
   "panels": [
@@ -255,6 +255,63 @@
           "refId": "D",
           "format": "time_series",
           "rawSql": "SELECT r.time AS \"time\", p.name || ' PM10' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm10_ug_m3' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Power Health (Raspberry Pi undervoltage)",
+      "description": "From `vcgencmd get_throttled` on each probe (weathernet_probe/health.py). 'now' is the instant of the last report; 'occurred' is sticky since that probe's last reboot, so it also catches a brief brownout (e.g. a sensor's fan inrush current) between two reporting cycles that 'now' would likely miss. Null on non-Pi hardware or if vcgencmd isn't available. No alert rule is provisioned -- add one manually in Grafana pointed at this panel's query if you want a notification, not just a place to look during troubleshooting.",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 48 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "undervoltage_now" },
+            "properties": [
+              { "id": "custom.displayMode", "value": "color-background" },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": { "text": "under-voltage now", "color": "red" },
+                      "false": { "text": "ok", "color": "green" }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "undervoltage_occurred" },
+            "properties": [
+              { "id": "custom.displayMode", "value": "color-background" },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": { "text": "occurred since reboot", "color": "orange" },
+                      "false": { "text": "ok", "color": "green" }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT DISTINCT ON (p.id) p.name, h.undervoltage_now, h.undervoltage_occurred, h.time AS last_health_at FROM telemetry_probehealth h JOIN probes_probe p ON p.id = h.probe_id ORDER BY p.id, h.time DESC;",
           "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
         }
       ]

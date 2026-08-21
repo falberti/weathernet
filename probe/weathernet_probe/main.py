@@ -57,6 +57,8 @@ def _build_payload(config: ProbeConfig, sensors) -> dict:
             "mem_percent": snapshot.mem_percent,
             "disk_percent": snapshot.disk_percent,
             "uptime_seconds": snapshot.uptime_seconds,
+            "undervoltage_now": snapshot.undervoltage_now,
+            "undervoltage_occurred": snapshot.undervoltage_occurred,
         },
     }
 

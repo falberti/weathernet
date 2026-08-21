@@ -6,6 +6,11 @@ from django.db.models import Avg, Max, Min
 from django.utils import timezone
 
 from probes.aqi import compute_air_quality_index
+from probes.sensor_fallback import (
+    HUMIDITY_SENSOR_TYPES,
+    PRESSURE_SENSOR_TYPES,
+    TEMPERATURE_SENSOR_TYPES,
+)
 from telemetry.models import SensorReading
 
 from ...matching import nearest_active_probe
@@ -74,11 +79,29 @@ def _fmt(value, suffix, decimals=1):
     return "n/d" if value is None else f"{value:.{decimals}f}{suffix}"
 
 
+def _aggregate_with_fallback(readings, sensor_types, **aggregations):
+    """Same coalescing policy as the public API (see
+    probes/sensor_fallback.py): try each sensor_type in priority
+    order, use the first one that actually has readings in this
+    window. Lets a probe with only the newer chip-specific sensors
+    (no BME680) still get a real digest instead of every field
+    silently rendering "n/d".
+    """
+    empty = {key: None for key in aggregations}
+    for sensor_type in sensor_types:
+        result = readings.filter(sensor_type=sensor_type).aggregate(**aggregations)
+        if any(value is not None for value in result.values()):
+            return result
+    return empty
+
+
 def _build_digest_message(subscription, probe, distance_km, start, end, label, is_first_time):
     readings = SensorReading.objects.filter(probe=probe, time__gte=start, time__lt=end)
-    temp = readings.filter(sensor_type="temperature_c").aggregate(min=Min("value"), max=Max("value"), avg=Avg("value"))
-    humidity = readings.filter(sensor_type="humidity_pct").aggregate(avg=Avg("value"))
-    pressure = readings.filter(sensor_type="pressure_hpa").aggregate(min=Min("value"), max=Max("value"), avg=Avg("value"))
+    temp = _aggregate_with_fallback(readings, TEMPERATURE_SENSOR_TYPES, min=Min("value"), max=Max("value"), avg=Avg("value"))
+    humidity = _aggregate_with_fallback(readings, HUMIDITY_SENSOR_TYPES, avg=Avg("value"))
+    pressure = _aggregate_with_fallback(readings, PRESSURE_SENSOR_TYPES, min=Min("value"), max=Max("value"), avg=Avg("value"))
+    # No BME680 gas sensor equivalent exists on the fallback chips --
+    # unlike the three above, this one intentionally has no fallback.
     gas = readings.filter(sensor_type="gas_resistance_ohm").aggregate(avg=Avg("value"))
 
     gas_baseline = (
