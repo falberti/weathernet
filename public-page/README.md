@@ -38,7 +38,10 @@ that comes back later.
 ## What's published, and what isn't
 
 Per probe: name, hardware type, latest temperature/humidity/pressure/
-gas-resistance readings, the heuristic air quality score, and
+gas-resistance readings, the air quality index (the real EPA standard
+when the probe has SPS30 PM data, otherwise the older BME680-only
+heuristic -- `index.php`'s `aqi_label()` renders the two differently,
+see its docblock), and
 **coordinates rounded to `PUBLIC_LOCATION_PRECISION_DECIMALS`** (2 by
 default, ~1km precision, set server-side) -- enough to place a probe
 in its general area (and plot it on the map) without revealing which

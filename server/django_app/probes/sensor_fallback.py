@@ -25,4 +25,14 @@ HUMIDITY_SENSOR_TYPES = ("humidity_pct", "htu21d_humidity_pct")
 PRESSURE_SENSOR_TYPES = ("pressure_hpa", "bmp280_pressure_hpa")
 GAS_SENSOR_TYPES = ("gas_resistance_ohm",)
 
+# PM2.5/PM10 have no fallback chain (SPS30 is the only sensor that
+# reports them) -- named here anyway so the AQI computation
+# (probes/aqi.py's compute_overall_air_quality_index) and anything
+# that needs to query for the latest reading share the exact same
+# sensor_type strings as sensors/sps30.py, rather than repeating the
+# literal string in three places.
+PM25_SENSOR_TYPE = "sps30_pm2_5_ug_m3"
+PM10_SENSOR_TYPE = "sps30_pm10_ug_m3"
+PM_SENSOR_TYPES = (PM25_SENSOR_TYPE, PM10_SENSOR_TYPE)
+
 ALL_SENSOR_TYPES = TEMPERATURE_SENSOR_TYPES + HUMIDITY_SENSOR_TYPES + PRESSURE_SENSOR_TYPES + GAS_SENSOR_TYPES

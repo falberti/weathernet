@@ -59,6 +59,14 @@ function load_probes_from_cache(array $env): array
                 'pressure_hpa' => $row['pressure_hpa'] !== null ? (float) $row['pressure_hpa'] : null,
                 'gas_resistance_ohm' => $row['gas_resistance_ohm'] !== null ? (float) $row['gas_resistance_ohm'] : null,
                 'air_quality_index' => $row['air_quality_index'] !== null ? (int) $row['air_quality_index'] : null,
+                // 'epa' (real US EPA AQI, 0-500+, from SPS30 PM2.5/PM10)
+                // or 'heuristic' (the older 0-100 BME680-only estimate) --
+                // aqi_label()/the map's colorFor() must render these very
+                // differently, not assume either. Missing on a MySQL row
+                // written before this column existed (pre-sync) -- treat
+                // that the same as 'heuristic' (index.php's whole AQI
+                // display predates the EPA path), not as a third case.
+                'air_quality_index_scale' => $row['air_quality_index_scale'] ?? 'heuristic',
             ],
         ];
     }, $rows);
@@ -69,10 +77,36 @@ function fmt(?float $value, string $suffix, int $decimals = 1): string
     return $value === null ? '--' : number_format($value, $decimals) . $suffix;
 }
 
-function aqi_label(?int $score, string $locale): array
+/**
+ * The two AQI sources (see PROJECT_SPEC.md Section 7.3 /
+ * probes/aqi.py's compute_overall_air_quality_index) are on genuinely
+ * different scales -- EPA's real PM-based one is 0-500+ with six
+ * official categories, the BME680-only fallback heuristic is 0-100
+ * with three -- so $scale decides which set of breakpoints/labels
+ * applies, never assume either.
+ */
+function aqi_label(?int $score, string $scale, string $locale): array
 {
     if ($score === null) {
         return ['--', '#999'];
+    }
+    if ($scale === 'epa') {
+        if ($score <= 50) {
+            return [t($locale, 'aqi_epa_good'), '#2e7d32'];
+        }
+        if ($score <= 100) {
+            return [t($locale, 'aqi_epa_moderate'), '#f9a825'];
+        }
+        if ($score <= 150) {
+            return [t($locale, 'aqi_epa_unhealthy_sensitive'), '#ef6c00'];
+        }
+        if ($score <= 200) {
+            return [t($locale, 'aqi_epa_unhealthy'), '#c62828'];
+        }
+        if ($score <= 300) {
+            return [t($locale, 'aqi_epa_very_unhealthy'), '#8e24aa'];
+        }
+        return [t($locale, 'aqi_epa_hazardous'), '#7b1113'];
     }
     if ($score >= 70) {
         return [t($locale, 'aqi_good'), '#2e7d32'];
@@ -196,7 +230,7 @@ $probes = load_probes_from_cache($env);
       <?php foreach ($probes as $probe): ?>
         <?php
           $r = $probe['readings'];
-          [$aqiLabel, $aqiColor] = aqi_label($r['air_quality_index'], $locale);
+          [$aqiLabel, $aqiColor] = aqi_label($r['air_quality_index'], $r['air_quality_index_scale'], $locale);
         ?>
         <div class="card">
           <h2><?= htmlspecialchars($probe['name']) ?></h2>
@@ -298,12 +332,24 @@ $probes = load_probes_from_cache($env);
       return `rgb(${r},${g},${b})`;
     }
 
+    // Mirrors PHP's aqi_label() -- same two scales, same reasoning:
+    // EPA's real PM-based AQI (0-500+, six categories) and the older
+    // BME680-only heuristic (0-100, three categories) are not
+    // comparable numbers, so the scale decides which breakpoints apply.
     function colorFor(param, readings) {
       const value = readings[param];
       if (value === null || value === undefined) {
         return '#999';
       }
       if (param === 'air_quality_index') {
+        if (readings.air_quality_index_scale === 'epa') {
+          if (value <= 50) return '#2e7d32';
+          if (value <= 100) return '#f9a825';
+          if (value <= 150) return '#ef6c00';
+          if (value <= 200) return '#c62828';
+          if (value <= 300) return '#8e24aa';
+          return '#7b1113';
+        }
         if (value >= 70) return '#2e7d32';
         if (value >= 40) return '#f9a825';
         return '#c62828';
@@ -340,12 +386,15 @@ $probes = load_probes_from_cache($env);
           fillColor: colorFor(param, probe.readings),
           fillOpacity: 0.35,
         }).addTo(map);
+        const aqiValue = probe.readings.air_quality_index;
+        const aqiOutOf = probe.readings.air_quality_index_scale === 'epa' ? 500 : 100;
+        const aqiText = aqiValue === null || aqiValue === undefined ? '--' : `${aqiValue}/${aqiOutOf}`;
         marker.bindPopup(
           `<strong>${probe.name}</strong><br>` +
           `${LABELS.temperature}: ${probe.readings.temperature_c ?? '--'} &deg;C<br>` +
           `${LABELS.humidity}: ${probe.readings.humidity_pct ?? '--'}%<br>` +
           `${LABELS.pressure}: ${probe.readings.pressure_hpa ?? '--'} hPa<br>` +
-          `${LABELS.aqi}: ${probe.readings.air_quality_index ?? '--'}`
+          `${LABELS.aqi}: ${aqiText}`
         );
         return marker;
       });

@@ -1341,7 +1341,8 @@ Response `200`:
         "humidity_pct": 51.2,
         "pressure_hpa": 1012.4,
         "gas_resistance_ohm": 82345.0,
-        "air_quality_index": 78
+        "air_quality_index": 78,
+        "air_quality_index_scale": "epa"
       }
     }
   ]
@@ -1355,22 +1356,38 @@ stored, so the exact property is never exposed publicly, while still
 placing a probe in its general area (and, with more than one probe,
 supporting a future geographic heatmap without an API change — the
 response shape is already a list per probe for exactly that reason,
-even though v1 ships with one probe). `air_quality_index` is a
-heuristic 0–100 score (`probes/aqi.py`): 75% weight on the latest gas
-resistance relative to its 7-day rolling maximum, 25% weight on
-humidity comfort (best near 40%) — **not an official/certified AQI**,
-a real calibrated IAQ needs Bosch's proprietary BSEC library, out of
-scope (see Section 12 and `probe/weathernet_probe/sensors/bme680.py`).
-`null` for any reading/score not yet available for a probe.
+even though v1 ships with one probe). `null` for any reading/score not
+yet available for a probe.
+
+`air_quality_index` (`probes/aqi.py`'s `compute_overall_air_quality_index`,
+shared with the Telegram digest) has two independent sources, in
+preference order, and `air_quality_index_scale` says which one actually
+produced the number since they're on genuinely different scales:
+
+- `"epa"` — the real US EPA AQI (0–500+, six official categories),
+  computed from the latest SPS30 PM2.5/PM10 readings against EPA's own
+  published breakpoint tables (current as of the May 2024 PM2.5
+  revision — see `probes/aqi.py`'s docstring for the source document).
+  `GREATEST` of the PM2.5 and PM10 sub-indices, matching EPA's own
+  "report the worst pollutant" methodology, not an average or a
+  PM2.5-only figure. PM1.0/PM4.0 have no EPA breakpoints and are not
+  folded into this score.
+- `"heuristic"` — the original 0–100, **not official/certified**
+  BME680-only score: 75% weight on the latest gas resistance relative
+  to its 7-day rolling maximum, 25% weight on humidity comfort (best
+  near 40%). Used only as a fallback, when a probe has no SPS30 data
+  at all — a real calibrated IAQ from BME680's own gas sensor needs
+  Bosch's proprietary BSEC library, out of scope (see Section 12 and
+  `probe/weathernet_probe/sensors/bme680.py`).
 
 `temperature_c`/`humidity_pct`/`pressure_hpa` are resolved through the
 same chip-fallback policy as the Telegram digest (`probes/sensor_
 fallback.py`, shared by both): BME680's generic `sensor_type` first if
 the probe has it, else BMP280/HTU21D-F's chip-prefixed equivalent. A
 probe with only the newer sensors still gets real readings here, not
-`null` across the board — but `gas_resistance_ohm`/`air_quality_index`
-have no such fallback, since no equivalent of BME680's gas sensor
-exists on the others.
+`null` across the board. `gas_resistance_ohm` itself (as opposed to
+`air_quality_index`) has no fallback, since no equivalent of BME680's
+gas sensor exists on the others.
 
 **Never included, by design, however the response shape evolves**:
 `location_address`, `owner_email`, `owner_phone`. These exist on

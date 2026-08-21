@@ -8,6 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from probes.models import Probe
+from probes.sensor_fallback import PM10_SENSOR_TYPE, PM25_SENSOR_TYPE
 from telemetry.models import SensorReading
 
 from . import geocoding as geocoding_module
@@ -368,7 +369,30 @@ class SendDailyDigestTests(TestCase):
         self.assertIn("max 19.5°C", text)
         self.assertIn("55%", text)
         self.assertIn("1013 hPa", text)
-        self.assertIn("Qualità aria: n/d", text)  # no BME680 gas sensor -> no AQI
+        self.assertIn("Qualità aria: n/d", text)  # no gas sensor and no PM data in this test -> no AQI
+
+    @patch("subscriptions.management.commands.send_daily_digest.send_message")
+    def test_sps30_pm_data_produces_epa_scale_aqi_in_digest(self, mock_send):
+        # A probe with SPS30 (no BME680 gas_resistance_ohm at all) --
+        # the digest must use the real EPA PM breakpoints, labeled on
+        # their own 0-500 scale, not stay "n/d" or reuse the old
+        # 0-100 heuristic's wording.
+        probe = Probe.objects.create(
+            name="p", hardware_type=Probe.HardwareType.RASPBERRY_PI_3,
+            location_latitude="45.46", location_longitude="9.19", is_active=True,
+        )
+        yesterday = timezone.localtime(timezone.now()).date() - datetime.timedelta(days=1)
+        base = timezone.make_aware(datetime.datetime.combine(yesterday, datetime.time(12, 0)))
+        SensorReading.objects.create(probe=probe, sensor_type=PM25_SENSOR_TYPE, value=9.0, time=base)
+        SensorReading.objects.create(probe=probe, sensor_type=PM10_SENSOR_TYPE, value=54, time=base)
+        WeatherSubscription.objects.create(
+            chat_id=1, query_text="q", place_label="Milano", latitude="45.4650", longitude="9.1910"
+        )
+
+        call_command("send_daily_digest")
+
+        text = mock_send.call_args[0][1]
+        self.assertIn("Qualità aria: Buona (50/500)", text)
 
     @patch("subscriptions.management.commands.send_daily_digest.send_message")
     def test_readings_from_two_days_ago_are_not_counted(self, mock_send):

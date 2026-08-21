@@ -104,10 +104,10 @@ $stmt = $pdo->prepare('
     INSERT INTO probe_cache
         (probe_name, hardware_type, latitude, longitude, last_seen_at,
          temperature_c, humidity_pct, pressure_hpa, gas_resistance_ohm,
-         air_quality_index, history_json, updated_at)
+         air_quality_index, air_quality_index_scale, history_json, updated_at)
     VALUES
         (:name, :hardware_type, :lat, :lon, :last_seen_at,
-         :temp, :hum, :pres, :gas, :aqi, :history, NOW())
+         :temp, :hum, :pres, :gas, :aqi, :aqi_scale, :history, NOW())
     ON DUPLICATE KEY UPDATE
         hardware_type = VALUES(hardware_type),
         latitude = VALUES(latitude),
@@ -118,6 +118,7 @@ $stmt = $pdo->prepare('
         pressure_hpa = VALUES(pressure_hpa),
         gas_resistance_ohm = VALUES(gas_resistance_ohm),
         air_quality_index = VALUES(air_quality_index),
+        air_quality_index_scale = VALUES(air_quality_index_scale),
         history_json = COALESCE(VALUES(history_json), history_json),
         updated_at = NOW()
 ');
@@ -137,6 +138,11 @@ foreach (($summary['probes'] ?? []) as $probe) {
         ':pres' => $r['pressure_hpa'],
         ':gas' => $r['gas_resistance_ohm'],
         ':aqi' => $r['air_quality_index'],
+        // Absent on a VM whose Django hasn't been updated yet, not
+        // just null -- ?? matters here, not just the array value
+        // being potentially null, since an older API response may not
+        // have this key in the JSON at all.
+        ':aqi_scale' => $r['air_quality_index_scale'] ?? null,
         // Bound as SQL NULL (not the string "null") when this run's
         // history fetch failed, so ON DUPLICATE KEY UPDATE's COALESCE
         // above keeps whatever was there before instead of wiping it.

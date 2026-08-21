@@ -14,8 +14,14 @@ from django.utils import timezone
 
 from telemetry.models import SensorReading
 
-from .aqi import compute_air_quality_index
+from .aqi import (
+    compute_air_quality_index,
+    compute_overall_air_quality_index,
+    compute_pm10_aqi,
+    compute_pm25_aqi,
+)
 from .models import EnrollmentToken, Probe
+from .sensor_fallback import PM10_SENSOR_TYPE, PM25_SENSOR_TYPE
 
 
 def _generate_csr_pem(common_name="ignored-by-server"):
@@ -260,6 +266,71 @@ class AirQualityIndexTests(TestCase):
         )
 
 
+class EpaPmAqiTests(TestCase):
+    """Values checked against Table 6 of the AirNow "Technical
+    Assistance Document for the Reporting of Daily Air Quality"
+    (document.airnow.gov) -- the current (May 2024-revised) official
+    EPA breakpoints, not a heuristic.
+    """
+
+    def test_pm25_none_returns_none(self):
+        self.assertIsNone(compute_pm25_aqi(None))
+
+    def test_pm25_breakpoint_boundaries(self):
+        self.assertEqual(compute_pm25_aqi(0.0), 0)
+        self.assertEqual(compute_pm25_aqi(9.0), 50)   # top of "Good"
+        self.assertEqual(compute_pm25_aqi(9.1), 51)   # bottom of "Moderate"
+        self.assertEqual(compute_pm25_aqi(35.4), 100)
+        self.assertEqual(compute_pm25_aqi(225.5), 301)  # bottom of "Hazardous"
+
+    def test_pm25_truncates_to_one_decimal_before_lookup(self):
+        # 9.09 truncates to 9.0 -- still "Good" (AQI 50), not rounded
+        # up to 9.1, which would cross into "Moderate".
+        self.assertEqual(compute_pm25_aqi(9.09), 50)
+
+    def test_pm25_extrapolates_above_the_table(self):
+        # Above the highest breakpoint (325.4 -> AQI 500), the AQI
+        # keeps climbing using the same slope rather than capping.
+        self.assertGreater(compute_pm25_aqi(400.0), 500)
+
+    def test_pm10_none_returns_none(self):
+        self.assertIsNone(compute_pm10_aqi(None))
+
+    def test_pm10_breakpoint_boundaries(self):
+        self.assertEqual(compute_pm10_aqi(0), 0)
+        self.assertEqual(compute_pm10_aqi(54), 50)
+        self.assertEqual(compute_pm10_aqi(55), 51)
+        self.assertEqual(compute_pm10_aqi(604), 500)
+
+    def test_pm10_truncates_to_integer_before_lookup(self):
+        self.assertEqual(compute_pm10_aqi(54.9), 50)  # truncates to 54, not rounds to 55
+
+
+class CombinedAirQualityIndexTests(TestCase):
+    def test_uses_pm_when_available_and_flags_epa_scale(self):
+        value, is_epa = compute_overall_air_quality_index(9.0, 54, None, None, None)
+        self.assertEqual(value, 50)
+        self.assertTrue(is_epa)
+
+    def test_reports_the_worse_of_pm25_and_pm10(self):
+        # PM10=254 -> AQI 100 ("Moderate"), PM2.5=55.4 -> AQI 150
+        # ("Unhealthy for Sensitive Groups") -- the combined score must
+        # be the worse (higher) of the two, not PM2.5-only or an average.
+        value, is_epa = compute_overall_air_quality_index(55.4, 254, None, None, None)
+        self.assertEqual(value, 150)
+        self.assertTrue(is_epa)
+
+    def test_falls_back_to_heuristic_when_no_pm_data(self):
+        value, is_epa = compute_overall_air_quality_index(None, None, 100000, 100000, 40)
+        self.assertEqual(value, compute_air_quality_index(100000, 100000, 40))
+        self.assertFalse(is_epa)
+
+    def test_none_when_nothing_available(self):
+        value, is_epa = compute_overall_air_quality_index(None, None, None, None, None)
+        self.assertIsNone(value)
+        self.assertFalse(is_epa)
+
+
 class PublicApiTestBase:
     """Shared fixture for the /api/v1/public/* views: same API key
     setting, same notion of an eligible probe.
@@ -378,11 +449,12 @@ class PublicSummaryViewTests(PublicApiTestBase, TestCase):
         self.assertEqual(response.json()["probes"][0]["readings"]["temperature_c"], 20.0)
 
     def test_bmp280_and_htu21d_used_as_fallback_when_bme680_absent(self):
-        # A probe with only the newer sensors (no BME680) -- the public
-        # API shouldn't need to know or care which hardware combination
-        # is actually attached. No gas_resistance_ohm/AQI equivalent
-        # exists on these, so both stay null, same as before a real
-        # sensor was ever attached.
+        # A probe with only the newer sensors (no BME680, and no SPS30
+        # readings created in this test either) -- the public API
+        # shouldn't need to know or care which hardware combination is
+        # actually attached. gas_resistance_ohm has no fallback at all,
+        # and air_quality_index has no data to compute from (from
+        # either source) in this particular test, so both stay null.
         probe = self._make_probe()
         now = timezone.now()
         SensorReading.objects.create(probe=probe, sensor_type="bmp280_temperature_c", value=19.5, time=now)
@@ -396,6 +468,21 @@ class PublicSummaryViewTests(PublicApiTestBase, TestCase):
         self.assertEqual(readings["humidity_pct"], 55.0)
         self.assertIsNone(readings["gas_resistance_ohm"])
         self.assertIsNone(readings["air_quality_index"])
+        self.assertEqual(response.json()["probes"][0]["readings"]["air_quality_index_scale"], "heuristic")
+
+    def test_sps30_pm_data_produces_epa_scale_air_quality_index(self):
+        # A probe with SPS30 (no BME680 gas_resistance_ohm at all) --
+        # air_quality_index must come from the real EPA PM breakpoints,
+        # not stay null just because there's no gas sensor.
+        probe = self._make_probe()
+        now = timezone.now()
+        SensorReading.objects.create(probe=probe, sensor_type=PM25_SENSOR_TYPE, value=9.0, time=now)
+        SensorReading.objects.create(probe=probe, sensor_type=PM10_SENSOR_TYPE, value=54, time=now)
+
+        response = self._get()
+        readings = response.json()["probes"][0]["readings"]
+        self.assertEqual(readings["air_quality_index"], 50)
+        self.assertEqual(readings["air_quality_index_scale"], "epa")
 
 
 @override_settings(PUBLIC_SUMMARY_API_KEY="test-summary-key")

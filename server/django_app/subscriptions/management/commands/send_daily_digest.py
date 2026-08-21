@@ -5,9 +5,11 @@ from django.core.management.base import BaseCommand
 from django.db.models import Avg, Max, Min
 from django.utils import timezone
 
-from probes.aqi import compute_air_quality_index
+from probes.aqi import compute_overall_air_quality_index
 from probes.sensor_fallback import (
     HUMIDITY_SENSOR_TYPES,
+    PM10_SENSOR_TYPE,
+    PM25_SENSOR_TYPE,
     PRESSURE_SENSOR_TYPES,
     TEMPERATURE_SENSOR_TYPES,
 )
@@ -103,14 +105,20 @@ def _build_digest_message(subscription, probe, distance_km, start, end, label, i
     # No BME680 gas sensor equivalent exists on the fallback chips --
     # unlike the three above, this one intentionally has no fallback.
     gas = readings.filter(sensor_type="gas_resistance_ohm").aggregate(avg=Avg("value"))
+    # Yesterday's *average* PM, not the latest single reading (unlike
+    # the public API) -- EPA's own AQI is itself defined against a
+    # 24-hour average concentration, so this digest's figure is
+    # actually closer to the real EPA methodology than a snapshot.
+    pm25 = readings.filter(sensor_type=PM25_SENSOR_TYPE).aggregate(avg=Avg("value"))["avg"]
+    pm10 = readings.filter(sensor_type=PM10_SENSOR_TYPE).aggregate(avg=Avg("value"))["avg"]
 
     gas_baseline = (
         SensorReading.objects.filter(
             probe=probe, sensor_type="gas_resistance_ohm", time__gte=timezone.now() - GAS_BASELINE_WINDOW
         ).aggregate(baseline=Max("value"))["baseline"]
     )
-    aqi = compute_air_quality_index(gas["avg"], gas_baseline, humidity["avg"])
-    aqi_label = "n/d" if aqi is None else f"{_aqi_word(aqi)} ({aqi}/100)"
+    aqi, aqi_is_epa = compute_overall_air_quality_index(pm25, pm10, gas["avg"], gas_baseline, humidity["avg"])
+    aqi_label = _format_aqi_label(aqi, aqi_is_epa)
 
     lines = []
     if is_first_time:
@@ -127,7 +135,36 @@ def _build_digest_message(subscription, probe, distance_km, start, end, label, i
     return "\n".join(lines)
 
 
-def _aqi_word(score):
+def _format_aqi_label(score, is_epa):
+    """The two AQI sources (see probes/aqi.py's
+    compute_overall_air_quality_index) are on different scales -- EPA's
+    real PM-based one is 0-500+ with six categories, the BME680
+    fallback heuristic is 0-100 with three -- so the label and the
+    "out of" figure shown must match whichever one actually produced
+    this score, not always assume one or the other.
+    """
+    if score is None:
+        return "n/d"
+    if is_epa:
+        return f"{_epa_aqi_word(score)} ({score}/500)"
+    return f"{_heuristic_aqi_word(score)} ({score}/100)"
+
+
+def _epa_aqi_word(score):
+    if score <= 50:
+        return "Buona"
+    if score <= 100:
+        return "Moderata"
+    if score <= 150:
+        return "Nociva per gruppi sensibili"
+    if score <= 200:
+        return "Nociva"
+    if score <= 300:
+        return "Molto nociva"
+    return "Pericolosa"
+
+
+def _heuristic_aqi_word(score):
     if score >= 70:
         return "Buona"
     if score >= 40:

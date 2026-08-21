@@ -5,7 +5,7 @@
   "tags": ["weathernet"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 6,
+  "version": 7,
   "refresh": "1m",
   "time": { "from": "now-24h", "to": "now" },
   "panels": [
@@ -122,21 +122,24 @@
     {
       "id": 7,
       "type": "gauge",
-      "title": "Air Quality Index (heuristic)",
-      "description": "NOT an official/certified AQI -- a real calibrated IAQ requires Bosch's proprietary BSEC library, out of scope here (see probe/weathernet_probe/sensors/bme680.py). This is a relative indicator only: 75% weight on the latest gas resistance vs. its 7-day rolling maximum (higher resistance = cleaner air), 25% weight on humidity comfort (best near 40%). 100 = best observed conditions recently, not an absolute standard.",
+      "title": "Air Quality Index (EPA, PM2.5/PM10)",
+      "description": "The real US EPA AQI (Table 6, document.airnow.gov, current as of the May 2024 PM2.5 revision) -- not a heuristic. GREATEST of the PM2.5 and PM10 sub-indices, matching EPA's own \"report the worst pollutant\" methodology; whichever of the two has no data is ignored, not treated as zero. PM1.0/PM4.0 have no EPA breakpoints, so they're not folded in here -- see their own concentration gauges below. Blank on a probe with no SPS30 (e.g. BME680-only) -- see the Gas Resistance panel for that case instead; probes/aqi.py's compute_overall_air_quality_index is the source of truth this mirrors.",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
       "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "min": 0,
-          "max": 100,
+          "max": 500,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 40 },
-              { "color": "green", "value": 70 }
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 51 },
+              { "color": "orange", "value": 101 },
+              { "color": "red", "value": 151 },
+              { "color": "purple", "value": 201 },
+              { "color": "dark-red", "value": 301 }
             ]
           }
         },
@@ -146,7 +149,135 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "WITH latest_gas AS (\n  SELECT r.value AS gas_resistance\n  FROM telemetry_sensorreading r\n  WHERE r.sensor_type = 'gas_resistance_ohm'\n  ORDER BY r.time DESC LIMIT 1\n),\nbaseline_gas AS (\n  SELECT max(r.value) AS gas_baseline\n  FROM telemetry_sensorreading r\n  WHERE r.sensor_type = 'gas_resistance_ohm' AND r.time > now() - interval '7 days'\n),\nlatest_hum AS (\n  SELECT r.value AS humidity\n  FROM telemetry_sensorreading r\n  WHERE r.sensor_type = 'humidity_pct'\n  ORDER BY r.time DESC LIMIT 1\n)\nSELECT round(\n  0.75 * least(100, 100.0 * latest_gas.gas_resistance / nullif(baseline_gas.gas_baseline, 0))\n  + 0.25 * (100 - least(100, abs(latest_hum.humidity - 40) * 2.5))\n) AS \"Air Quality Index\"\nFROM latest_gas, baseline_gas, latest_hum;",
+          "rawSql": "WITH latest_pm25 AS (\n  SELECT r.value AS pm25 FROM telemetry_sensorreading r\n  WHERE r.sensor_type = 'sps30_pm2_5_ug_m3' ORDER BY r.time DESC LIMIT 1\n),\nlatest_pm10 AS (\n  SELECT r.value AS pm10 FROM telemetry_sensorreading r\n  WHERE r.sensor_type = 'sps30_pm10_ug_m3' ORDER BY r.time DESC LIMIT 1\n)\nSELECT GREATEST(\n  (SELECT CASE\n    WHEN pm25 IS NULL THEN NULL\n    WHEN pm25 <= 9.0   THEN round(((50.0-0.0)/(9.0-0.0)) * (pm25-0.0) + 0)\n    WHEN pm25 <= 35.4  THEN round(((100.0-51.0)/(35.4-9.1)) * (pm25-9.1) + 51)\n    WHEN pm25 <= 55.4  THEN round(((150.0-101.0)/(55.4-35.5)) * (pm25-35.5) + 101)\n    WHEN pm25 <= 125.4 THEN round(((200.0-151.0)/(125.4-55.5)) * (pm25-55.5) + 151)\n    WHEN pm25 <= 225.4 THEN round(((300.0-201.0)/(225.4-125.5)) * (pm25-125.5) + 201)\n    ELSE round(((500.0-301.0)/(325.4-225.5)) * (pm25-225.5) + 301)\n  END FROM latest_pm25),\n  (SELECT CASE\n    WHEN pm10 IS NULL THEN NULL\n    WHEN pm10 <= 54  THEN round(((50.0-0.0)/(54.0-0.0)) * (pm10-0.0) + 0)\n    WHEN pm10 <= 154 THEN round(((100.0-51.0)/(154.0-55.0)) * (pm10-55.0) + 51)\n    WHEN pm10 <= 254 THEN round(((150.0-101.0)/(254.0-155.0)) * (pm10-155.0) + 101)\n    WHEN pm10 <= 354 THEN round(((200.0-151.0)/(354.0-255.0)) * (pm10-255.0) + 151)\n    WHEN pm10 <= 424 THEN round(((300.0-201.0)/(424.0-355.0)) * (pm10-355.0) + 201)\n    ELSE round(((500.0-301.0)/(604.0-425.0)) * (pm10-425.0) + 301)\n  END FROM latest_pm10)\n) AS \"Air Quality Index\";",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "gauge",
+      "title": "PM1.0",
+      "description": "Mass concentration, µg/m³. EPA defines no official AQI breakpoints for this size fraction (only PM2.5 and PM10 -- see the combined Air Quality Index gauge above), so this is a raw reading with informal color bands only, not an index.",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 56 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µg/m³",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "orange", "value": 25 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT r.value FROM telemetry_sensorreading r WHERE r.sensor_type = 'sps30_pm1_0_ug_m3' ORDER BY r.time DESC LIMIT 1;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "gauge",
+      "title": "PM2.5",
+      "description": "Mass concentration, µg/m³ -- this is the raw reading behind the PM2.5 half of the Air Quality Index gauge above; see that panel for the actual EPA index/category.",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 56 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µg/m³",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 9.1 },
+              { "color": "orange", "value": 35.5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT r.value FROM telemetry_sensorreading r WHERE r.sensor_type = 'sps30_pm2_5_ug_m3' ORDER BY r.time DESC LIMIT 1;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "gauge",
+      "title": "PM4.0",
+      "description": "Mass concentration, µg/m³. EPA defines no official AQI breakpoints for this size fraction (only PM2.5 and PM10 -- see the combined Air Quality Index gauge above), so this is a raw reading with informal color bands only, not an index.",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 56 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µg/m³",
+          "min": 0,
+          "max": 150,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 20 },
+              { "color": "orange", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT r.value FROM telemetry_sensorreading r WHERE r.sensor_type = 'sps30_pm4_0_ug_m3' ORDER BY r.time DESC LIMIT 1;",
+          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "gauge",
+      "title": "PM10",
+      "description": "Mass concentration, µg/m³ -- this is the raw reading behind the PM10 half of the Air Quality Index gauge above; see that panel for the actual EPA index/category.",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 56 },
+      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µg/m³",
+          "min": 0,
+          "max": 250,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 55 },
+              { "color": "orange", "value": 155 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT r.value FROM telemetry_sensorreading r WHERE r.sensor_type = 'sps30_pm10_ug_m3' ORDER BY r.time DESC LIMIT 1;",
           "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
         }
       ]

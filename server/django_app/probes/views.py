@@ -14,10 +14,11 @@ from rest_framework.views import APIView
 from telemetry.models import SensorReading
 
 from . import ca, ssh
-from .aqi import compute_air_quality_index
+from .aqi import compute_overall_air_quality_index
 from .models import EnrollmentToken, Probe
 from .sensor_fallback import ALL_SENSOR_TYPES as PUBLIC_SUMMARY_SENSOR_TYPES
 from .sensor_fallback import HUMIDITY_SENSOR_TYPES as PUBLIC_HUMIDITY_SENSOR_TYPES
+from .sensor_fallback import PM10_SENSOR_TYPE, PM25_SENSOR_TYPE, PM_SENSOR_TYPES
 from .sensor_fallback import PRESSURE_SENSOR_TYPES as PUBLIC_PRESSURE_SENSOR_TYPES
 from .sensor_fallback import TEMPERATURE_SENSOR_TYPES as PUBLIC_TEMPERATURE_SENSOR_TYPES
 from .serializers import EnrollRequestSerializer
@@ -53,6 +54,23 @@ def _check_public_api_key(request):
     if not configured_key or not hmac.compare_digest(provided_key, configured_key):
         return Response({"detail": "invalid or missing API key"}, status=401)
     return None
+
+
+def _air_quality_fields(pm25, pm10, gas_resistance, gas_baseline, humidity):
+    """Builds the `air_quality_index`/`air_quality_index_scale` pair
+    for the public API response. The scale field exists because the
+    two possible sources (see aqi.py's compute_overall_air_quality_index)
+    are on genuinely different scales -- "epa" is 0-500+ with EPA's six
+    named categories, "heuristic" is the older 0-100 BME680-only
+    fallback -- a consumer of this API needs to know which one it's
+    looking at to render it correctly (e.g. public-page/'s gauge
+    color/label logic), not assume either.
+    """
+    value, is_epa = compute_overall_air_quality_index(pm25, pm10, gas_resistance, gas_baseline, humidity)
+    return {
+        "air_quality_index": value,
+        "air_quality_index_scale": "epa" if is_epa else "heuristic",
+    }
 
 
 def _first_available(readings: dict, sensor_types: tuple):
@@ -221,7 +239,9 @@ class PublicSummaryView(APIView):
 
         latest_readings = {}
         readings_qs = (
-            SensorReading.objects.filter(probe__in=probes, sensor_type__in=PUBLIC_SUMMARY_SENSOR_TYPES)
+            SensorReading.objects.filter(
+                probe__in=probes, sensor_type__in=PUBLIC_SUMMARY_SENSOR_TYPES + PM_SENSOR_TYPES
+            )
             .order_by("probe_id", "sensor_type", "-time")
             .distinct("probe_id", "sensor_type")
         )
@@ -255,7 +275,9 @@ class PublicSummaryView(APIView):
                         "humidity_pct": _first_available(readings, PUBLIC_HUMIDITY_SENSOR_TYPES),
                         "pressure_hpa": _first_available(readings, PUBLIC_PRESSURE_SENSOR_TYPES),
                         "gas_resistance_ohm": readings.get("gas_resistance_ohm"),
-                        "air_quality_index": compute_air_quality_index(
+                        **_air_quality_fields(
+                            readings.get(PM25_SENSOR_TYPE),
+                            readings.get(PM10_SENSOR_TYPE),
                             readings.get("gas_resistance_ohm"),
                             gas_baselines.get(probe.id),
                             _first_available(readings, PUBLIC_HUMIDITY_SENSOR_TYPES),
