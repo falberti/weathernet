@@ -272,6 +272,20 @@ A few things worth knowing about how these two differ from BME680:
   original generic names (`temperature_c`, etc.) for backward
   compatibility with already-stored data and the existing dashboard
   panels; this is a deliberate inconsistency, not an oversight.
+- **BMP280 rejects readings outside the chip's own operating range**
+  (-40..85°C, 300..1100 hPa -- Bosch's datasheet, not a guess) instead
+  of reporting them. Hit for real: a corrupted I2C read once
+  compensated into a plausible-looking 180°C that silently sat in
+  Grafana for hours before anyone noticed, precisely because 180
+  doesn't *look* like garbage the way an obviously-broken value would.
+  Now that shows up as a `SensorReadError` in the log
+  (`BMP280 reading 180.0C is outside the chip's own operating range`)
+  and gets skipped for that cycle instead of polluting the stored
+  data -- this doesn't fix whatever *caused* the bad read (I2C noise,
+  a transient glitch, ...), it just stops it from reaching the
+  dashboard unnoticed. If you see this warning recur, that's the
+  signal something upstream needs investigating, not the driver being
+  overly strict.
 
 ### SPS30 wiring (UART)
 

@@ -40,6 +40,19 @@ except ImportError:
 _device = None
 _device_lock = threading.Lock()
 
+# Bosch's own operating range (BMP280 datasheet, "Absolute Maximum
+# Ratings" / "Operating temperature" -- bst-bmp280-ds001.pdf, checked
+# directly, not assumed): a reading outside these bounds cannot be a
+# real measurement regardless of how extreme the actual weather is --
+# it's a corrupted read (e.g. an I2C bit error) that happened to
+# compensate into a plausible-looking number instead of an obvious
+# garbage one. Hit for real: a bit error once produced a reading of
+# 180C, which silently polluted Grafana for hours before anyone
+# noticed, precisely because 180 doesn't *look* like garbage the way
+# e.g. a negative Kelvin value would.
+_TEMPERATURE_RANGE_C = (-40.0, 85.0)
+_PRESSURE_RANGE_HPA = (300.0, 1100.0)
+
 
 def _get_device():
     global _device
@@ -57,6 +70,16 @@ def _get_device():
         return _device
 
 
+def _check_plausible(value: float, value_range: tuple, unit: str) -> float:
+    low, high = value_range
+    if not (low <= value <= high):
+        raise SensorReadError(
+            f"BMP280 reading {value}{unit} is outside the chip's own operating range "
+            f"({low}..{high}{unit}) -- treating as a corrupted read, not a real measurement"
+        )
+    return value
+
+
 class BMP280TemperatureSensor(Sensor):
     sensor_type = "bmp280_temperature_c"
     unit = "c"
@@ -65,9 +88,10 @@ class BMP280TemperatureSensor(Sensor):
         device = _get_device()
         with _device_lock:
             try:
-                return round(device.get_temperature(), 2)
+                value = round(device.get_temperature(), 2)
             except (RuntimeError, OSError) as exc:
                 raise SensorReadError(f"BMP280 temperature read failed: {exc}") from exc
+        return _check_plausible(value, _TEMPERATURE_RANGE_C, "C")
 
 
 class BMP280PressureSensor(Sensor):
@@ -78,6 +102,7 @@ class BMP280PressureSensor(Sensor):
         device = _get_device()
         with _device_lock:
             try:
-                return round(device.get_pressure(), 2)
+                value = round(device.get_pressure(), 2)
             except (RuntimeError, OSError) as exc:
                 raise SensorReadError(f"BMP280 pressure read failed: {exc}") from exc
+        return _check_plausible(value, _PRESSURE_RANGE_HPA, "hPa")
