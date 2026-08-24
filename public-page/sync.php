@@ -18,6 +18,12 @@
  * rather than being wiped with a null. See the ON DUPLICATE KEY UPDATE
  * below.
  *
+ * Also prunes: any probe_cache row not named in this run's summary
+ * response (deactivated in Django admin, or deleted outright) is
+ * deleted, not just left un-upserted -- otherwise a disabled probe
+ * would keep showing on the public page with its last cached readings
+ * forever, since upsert alone never removes rows.
+ *
  * history_json is a snapshot of the VM's own history window, not an
  * accumulating archive -- every run replaces it wholesale. Building a
  * real local history (INSERT instead of UPDATE, keeping every row) is
@@ -124,6 +130,7 @@ $stmt = $pdo->prepare('
 ');
 
 $count = 0;
+$seenNames = [];
 foreach (($summary['probes'] ?? []) as $probe) {
     $r = $probe['readings'];
     $series = $historyByProbe[$probe['name']] ?? null;
@@ -148,7 +155,21 @@ foreach (($summary['probes'] ?? []) as $probe) {
         // above keeps whatever was there before instead of wiping it.
         ':history' => $series !== null ? json_encode($series) : null,
     ]);
+    $seenNames[] = $probe['name'];
     $count++;
 }
 
-echo "sync.php: updated {$count} probe(s) at " . date('c') . "\n";
+// Prune anything no longer in the API response -- a deactivated or
+// deleted probe otherwise stays in probe_cache forever (upsert only
+// ever adds/updates rows, never removes them), so index.php would keep
+// showing it with its last cached readings indefinitely.
+if ($seenNames === []) {
+    $pruned = $pdo->exec('DELETE FROM probe_cache');
+} else {
+    $placeholders = implode(',', array_fill(0, count($seenNames), '?'));
+    $pruneStmt = $pdo->prepare("DELETE FROM probe_cache WHERE probe_name NOT IN ({$placeholders})");
+    $pruneStmt->execute($seenNames);
+    $pruned = $pruneStmt->rowCount();
+}
+
+echo "sync.php: updated {$count} probe(s), pruned {$pruned} stale probe(s) at " . date('c') . "\n";

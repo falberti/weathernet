@@ -174,8 +174,11 @@ triggered by the *external host's* own cron (not this project's
 `server`/`probe` components) every 10 minutes, is the only thing that
 calls `/api/v1/public/summary` and `/api/v1/public/history` — it
 upserts the result into a small MySQL table on that same external
-host. `public-page/index.php`, what visitors actually load, reads only
-from that MySQL table. This decouples visitor traffic from VM load
+host, then deletes any row for a probe no longer present in that
+response (deactivated or removed `Probe`s don't just stop being
+updated — they're actively pruned, so the cache can't outlive the API's
+own `is_active` filter). `public-page/index.php`, what visitors
+actually load, reads only from that MySQL table. This decouples visitor traffic from VM load
 entirely: however many people load the page in a burst, the VM only
 ever sees one request pair per cron interval, at a fixed and
 predictable rate — the nginx rate limit above is a backstop, not the
