@@ -1,7 +1,7 @@
 # Stevenson-screen-style radiation shield for SPS30 + BMP280 + HTU21D-F
 
 Overall envelope **197 × 145 × 154 mm** (bracket included). Shield Ø 145.5 mm, height 154 mm.
-Material **ASA**. Estimated mass ~233 g at 35% infill.
+Material **ASA**. Estimated mass ~229 g at 35% infill.
 
 ## Why it's built this way
 
@@ -18,10 +18,13 @@ Two stacked chambers separated by a solid partition:
 - **T/RH chamber (bottom)** — 5 louver plates with a 60° skirt, open bottom,
   BMP280 and HTU21D-F on a panel suspended in the middle, ventilated on both faces.
 
-The port-facing wall is **flush with the enclosure's opening**, with an EPDM
-gasket around it: the openings are large and in direct contact with ambient air
-(Sensirion's recommendation), and neither the inlet nor the outlet communicates
-with the enclosure's interior.
+The sensor's port face sits **flush with the outer wall**: its nose enters the
+opening, which is deliberately 2.8 mm narrower than the sensor (15.6 vs 12.8 mm).
+A **foam collar** wrapped around the nose fills the 1.4 mm gap per side. This stops
+exhaust air from looping around the sensor inside the chamber and re-entering the
+inlets; without it the leak path (64 mm2) would be wider than the outlet itself
+(23 mm2). Openings stay large and in direct contact with ambient air, as Sensirion
+requires.
 Rain protection: a 45° drip edge, two vertical cheeks, and above all the
 Ø 130 mm roof, which overhangs the wall by 22 mm with a skirt that comes down
 to 1 mm above the opening's top edge.
@@ -35,7 +38,6 @@ to 1 mm above the opening's top edge.
 | `pm_body` | 1 | 114 × 109 × 58 | upright, base on the bed |
 | `pm_lid` | 1 | 146 × 146 × 14 | **upside down**, roof on the bed |
 | `sensor_carrier` | 1 | 60 × 17 × 64 | on its side, panel on the bed |
-| `mast_bracket` | 1 | 68 × 84 × 45 | upright, z=0 face on the bed |
 
 In these orientations, unsupported overhangs are ≤ 4% of the area and are only
 short bridges (opening's ceiling, louver slots, slots): **no supports needed**.
@@ -43,32 +45,76 @@ Requires a bed of at least 150 × 150 mm.
 
 ## Hardware
 
-- 3 × **M4 stainless threaded rod, 175 mm** + 6 M4 nyloc nuts + 6 wide washers
-- 2 × **M4 heat-set inserts** (Ø 5.6 × 8 mm hole) + 2 M4×16 screws — bracket mounting
-- 2 × **M3×16** self-tapping screws — sensor carrier (from above, through the partition)
-- 4 × 2.5 mm cable ties — securing the two breakout boards
-- adhesive **2 mm EPDM gasket** around the port opening (compresses to ~1 mm)
-- **3-4 mm foam** strip behind the SPS30 (preload against the gasket)
-- 1 × Ø 13 mm rubber cable gland
-- 2 × M6/M8 U-bolts or metal hose clamps for the mast (22 × 9 mm slots)
+All dimensions taken from the current model, not from memory.
+
+| # | Item | Qty | Where it goes |
+|---|---|---|---|
+| 1 | M4 stainless threaded rod, **170 mm** | 3 | Through the 3 boss columns, bottom to top |
+| 1 | M4 nyloc nut + washer | 6 | 3 under the lowest bosses, 3 on top of the roof |
+| 2 | **M3 x 12** self-tapping screw | 2 | From above, through the partition at x = +/-21, into the carrier tabs |
+| 3 | 2.5 mm cable tie | 4 | Two per breakout board, looped vertically through the 3.5 x 2.0 mm slots |
+| 4 | Foam collar, **3 mm** thick, ~5 mm wide, ~110 mm long | 1 | Wrapped around the SPS30 nose, all four sides |
+| 5 | **M6 x 25** hex-head bolt + nyloc nut + washer | 2 | Head drops into the hex pockets from *inside*; nut goes on outside |
+| 6 | M8 U-bolt (or metal hose clamp) | 2 | Through the four 22 x 9 mm slots in the saddle plate |
+| 7 | Insect mesh basket, **O83 x 77 mm** | 1 | Central aperture of the louver stack |
+| 8 | Insect mesh strip, **13 x 285 mm** | 1 | Annular seat inside the PM module, behind the vent slots |
+| 9 | Rubber cable gland, **O13 mm** (split type) | 1 | Partition hole at (0, -18) |
+| 10 | Foam, 1 mm | 2 | One strip behind the SPS30, one pad under the lid rib |
+
+Notes on sizing:
+
+- **Rod length.** Clamped stack is 154.2 mm (lowest boss to roof top). Adding a washer,
+  a nyloc nut and 2 mm of thread at each end gives 170 mm. Cut three from a 1 m rod.
+- **Washers.** The bosses are only O11, so the bottom washers must be standard DIN 125
+  (O9). Wide washers only fit on top, where they bear on the flat roof.
+- **M3 length.** 2.6 mm of partition + 8 mm of engagement in the carrier tab = 10.6 mm.
+  M3 x 16 would bottom out; use **M3 x 12**.
+- **M6 length.** 7 mm of boss in tension + 8 mm bracket + washer + nyloc = 21.6 mm under
+  the head. The pocket is 10.4 mm across flats against a 10.0 mm head, so the bolt can
+  turn only +/-4.5 deg before it locks: tighten the nut only.
+- **Cable gland.** Use a split/openable one. The ZHR-5 connector will not pass through a
+  closed grommet, and you do not want to solder it on afterwards.
+
+**No heat-set inserts are used anymore** — the M6 captive bolts replaced them.
+
+## Insect mesh
+
+Outdoors a louvered shield quickly becomes a wasp nest, so two seats are provided:
+
+- **T/RH chamber**: every louver plate has an O83.4 x 1.6 mm rebate on its top face.
+  Roll a O83 mesh basket (cylinder plus a bottom disc), drop it in from above before
+  fitting the partition. It springs into the rebates and rests on the step of the
+  lowest plate, so it cannot fall through. No glue.
+- **PM module**: an annular seat is recessed into the inner wall across the vent band.
+  A 13 mm tall strip holds itself by spring force.
+
+Stainless or fibreglass mesh, 0.8-1 mm aperture. Do not go finer or you choke the airflow.
+
+**Do not put mesh over the SPS30 ports** — Sensirion requires inlets and outlet to stay
+unobstructed; a screen in front clogs and crops the large particles, skewing PM10 while
+the sensor keeps returning plausible numbers. Leave the four 1.6 mm drain notches open
+too, or they stop draining.
 
 ## Assembly
 
-1. Thread the 3 rods through; stack from the bottom: nut + washer, 5 `louver`
-   plates, `plate_partition`. The built-in standoffs alone set the 15.6 mm pitch.
-2. Mount the BMP280 and HTU21D-F on the `sensor_carrier`: they rest on the 4×
-   3 mm standoffs (air on both sides) and are held down with one cable tie per board.
-   The STEMMA QT connectors stay free on the short sides.
-3. Screw the `sensor_carrier` under the partition with the 2 M3 screws from above.
-4. Glue the EPDM gasket to the inside face of the `pm_body` wall, around the
-   opening. Lower the SPS30 into its cradle (ports facing the opening,
-   **inlets on top**), slide the foam in behind it, and route the cable out
-   through the cable gland in the partition.
-5. Close with `pm_lid`: the internal rib presses on the sensor's top edge
-   (add 1 mm of foam there). Nyloc nuts on top, don't overtighten.
-6. Heat-set inserts into the rear boss, screw on the `mast_bracket`, mount to the pole.
+1. Thread the 3 rods; stack from the bottom: nut + washer, 5 `louver` plates,
+   `plate_partition`. The built-in bosses set the 15.6 mm pitch on their own.
+2. Drop the mesh basket into the central aperture before the partition goes on.
+3. Mount BMP280 and HTU21D-F on the `sensor_carrier`: they sit on the four 3 mm
+   standoffs (air on both faces), one cable tie per board holds them. STEMMA QT
+   connectors stay clear on the short sides.
+4. Screw the `sensor_carrier` under the partition, 2x M3 x 12 from above.
+5. Wrap the foam collar around the SPS30 nose, flush with the port face but **not over
+   the slots**. Lower the sensor into the cradle, **inlets on top**, and push the nose
+   into the opening until the face is flush with the outer wall.
+   Add the 1 mm foam behind it, against the rear stops.
+6. Feed the cable through the split gland in the partition *before* plugging it in.
+7. Press the mesh strip into the annular seat of the PM module.
+8. Drop the two M6 bolts into the hex pockets from inside, while the lid is still off.
+9. Close with `pm_lid` (1 mm foam pad under the internal rib). Nyloc nuts on top of the
+   roof, snug only.
 
-Orient the port opening **away from the mast and from prevailing rain-bearing winds**.
+Point the port opening **away from the mast and from prevailing rain-bearing winds**.
 
 ## Printing (ASA)
 
@@ -96,9 +142,6 @@ Edit and re-run: everything regenerates, assembly and exports included.
 
 - The roof is **flat** (so it can print upside down without supports). It sheds
   water fine thanks to the skirt, but if you want a dome, print it upright with a brim.
-- The ASA mast bracket is the weakest point of the assembly: if the mast is
-  exposed to strong wind, consider remaking it in aluminum using the STEP file
-  as a reference.
 - The SPS30's ZHR-5 connector vertical clearance isn't specified in the
   datasheet: the rear standoffs were kept low (z 0-17 mm) to leave it clear,
   but verify on the first dry-fit assembly.
