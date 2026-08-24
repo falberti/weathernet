@@ -190,8 +190,20 @@ sudo apt-get install -y i2c-tools
 i2cdetect -y 1   # expect to see a device at address 76
 ```
 
-To actually use it, edit `/etc/weathernet-probe/probe.yaml`'s `sensors:`
-list (replace or add to the mock entries), then:
+**Edit `/etc/weathernet-probe/probe.yaml`'s `sensors:` list** (replace
+or add to the mock entries) -- this is what actually turns the driver
+on, wiring the sensor alone isn't enough:
+
+```yaml
+sensors:
+  - bme680_temperature
+  - bme680_humidity
+  - bme680_pressure
+  - bme680_gas
+```
+
+Then install the new dependencies and restart the daemon so it picks up
+both the config change and the code:
 
 ```bash
 cd ~/weathernet/probe
@@ -247,13 +259,28 @@ instead, that's the one line to change. `3Vo` (the board's own
 regulated 3.3V output) isn't used here -- it's meant for powering
 *other* 3.3V-logic devices from this board, not an input.
 
-Then, same as BME680:
+Then enable I2C and confirm both chips answer, same as BME680:
 
 ```bash
 sudo raspi-config nonint do_i2c 0
 sudo apt-get install -y i2c-tools
 i2cdetect -y 1   # expect to see devices at 40 and 77 -- SPS30 is not on this bus, see below
 ```
+
+**Edit `/etc/weathernet-probe/probe.yaml`'s `sensors:` list** (replace or
+add to the mock entries) with whichever of these you actually wired --
+you don't have to enable all four:
+
+```yaml
+sensors:
+  - bmp280_temperature
+  - bmp280_pressure
+  - htu21d_temperature
+  - htu21d_humidity
+```
+
+Then install the new dependencies and restart the daemon so it picks up
+both the config change and the code:
 
 ```bash
 cd ~/weathernet/probe
@@ -354,6 +381,18 @@ not just one or the other. After rebooting, confirm the device exists:
 
 ```bash
 ls -l /dev/ttyAMA0
+```
+
+**Edit `/etc/weathernet-probe/probe.yaml`'s `sensors:` list**, same as
+for the others -- this is what actually turns the driver on, wiring it
+up alone isn't enough:
+
+```yaml
+sensors:
+  - sps30_pm1_0
+  - sps30_pm2_5
+  - sps30_pm4_0
+  - sps30_pm10
 ```
 
 Then, same pattern as the others:
