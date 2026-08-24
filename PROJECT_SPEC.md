@@ -333,10 +333,12 @@ weathernet/
 │   └── README.md
 ├── 3d-printing/                       # 3D-printable enclosure/mount designs -- see 11 for licensing
 │   ├── README.md                     # file-format + per-part licensing convention
-│   └── sensors_enclosure/            # MIT (inspired by, not derived from, a third-party CC design)
+│   └── stevenson_screen/             # MIT, original design (not derived from a third-party model)
 │       ├── README.md
-│       ├── case.FCStd, case.step, case.stl, case.3mf
-│       └── cover.FCStd, cover.step, cover.stl, cover.3mf
+│       ├── SPS30_StevensonScreen.FCStd
+│       ├── louver.step/.stl/.3mf, plate_partition.step/.stl/.3mf
+│       ├── pm_body.step/.stl/.3mf, pm_lid.step/.stl/.3mf
+│       └── sensor_carrier.step/.stl/.3mf, mast_bracket.step/.stl/.3mf
 └── docs/
     └── api-contract.md              # formal request/response schema
 ```
@@ -1652,18 +1654,15 @@ The top-level `README.md` must include, in this order:
   that model's own files (importing/tracing/modifying its mesh) or
   just *inspired by* it (rebuilt from scratch — copyright protects the
   specific expression of a design, not the general idea, nor
-  dimensions a physical component dictates). `3d-printing/sensors_enclosure/`
-  is the latter: it started from a CC BY-NC-SA 4.0 design, but that
-  design didn't fit the project's actual BME680 board, so it was
-  rebuilt from scratch in FreeCAD with no geometry imported from the
-  original — an independent work, not a derivative one, hence MIT
-  rather than carrying the CC license forward. Before publishing any
-  new design under `3d-printing/` that started from someone else's work:
-  if it's an actual modification of their files, add a `LICENSE` file
-  to that part's own subdirectory carrying their license forward
-  (most CC "ShareAlike" variants and the GPL family require exactly
-  that) — never assume MIT applies there by default in that case. See
-  `3d-printing/README.md`.
+  dimensions a physical component dictates). `3d-printing/stevenson_screen/`,
+  the one design that exists today, is an original build — not derived
+  from or inspired by any third-party model — hence plain MIT. Before
+  publishing any new design under `3d-printing/` that started from
+  someone else's work: if it's an actual modification of their files,
+  add a `LICENSE` file to that part's own subdirectory carrying their
+  license forward (most CC "ShareAlike" variants and the GPL family
+  require exactly that) — never assume MIT applies there by default in
+  that case. See `3d-printing/README.md`.
 
 ## 12. Explicitly Out of Scope for v1
 

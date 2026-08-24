@@ -324,15 +324,3 @@ could in principle start from or modify someone else's
 differently-licensed model in the future -- check each part's own
 `LICENSE`/`README.md` before reusing it if one exists (see
 [`3d-printing/README.md`](3d-printing/README.md) for the convention).
-
-## Acknowledgments
-
-- [`3d-printing/sensors_enclosure/`](3d-printing/sensors_enclosure/) was inspired by
-  [allmysparetime's Sensirion SPS30 / Adafruit BME280 Weatherproof
-  Outdoor Enclosure](https://www.printables.com/model/530737-sensirion-sps30-adafruit-bme280-weatherproof-outdo)
-  (CC BY-NC-SA 4.0) -- printed as-is first, found it didn't fit this
-  project's BME680 board, then modeled from scratch in FreeCAD rather
-  than modified from that design's own files. See
-  [`3d-printing/sensors_enclosure/README.md`](3d-printing/sensors_enclosure/README.md) for
-  why that makes this an independent design, not a derivative one,
-  credited here simply because it's the honest thing to do.

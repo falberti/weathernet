@@ -11,11 +11,15 @@ One subdirectory per physical part or assembly:
 
 ```
 3d-printing/
-├── sensors_enclosure/
-│   ├── README.md          -- print settings, hardware (screws/heat-inserts), assembly notes
-│   ├── case.FCStd          -- working file (parametric CAD -- see "File formats" below)
-│   ├── case.step, case.stl, case.3mf
-│   └── cover.FCStd, cover.step, cover.stl, cover.3mf
+├── stevenson_screen/
+│   ├── README.md                     -- print settings, hardware (screws/heat-inserts), assembly notes
+│   ├── SPS30_StevensonScreen.FCStd    -- working file (parametric CAD -- see "File formats" below)
+│   ├── louver.step, louver.stl, louver.3mf                 (×5 at print time)
+│   ├── plate_partition.step, plate_partition.stl, plate_partition.3mf
+│   ├── pm_body.step, pm_body.stl, pm_body.3mf
+│   ├── pm_lid.step, pm_lid.stl, pm_lid.3mf
+│   ├── sensor_carrier.step, sensor_carrier.stl, sensor_carrier.3mf
+│   └── mast_bracket.step, mast_bracket.stl, mast_bracket.3mf
 └── anemometer/             (future)
 ```
 
@@ -30,7 +34,7 @@ Two files per printable part, not one -- but which two depends on how
 the part was actually made:
 
 - **Modeled/edited in a parametric CAD tool** (FreeCAD, Fusion 360,
-  ... -- see `sensors_enclosure/`): keep the tool's native project file (e.g.
+  ... -- see `stevenson_screen/`): keep the tool's native project file (e.g.
   `.FCStd`, `.f3d`) as the actual working file -- full parametric
   history, sketches, everything editable. Also export a **`.step`**
   (or `.stp`) alongside it, the closest thing to a universal,
@@ -59,10 +63,7 @@ equivalent of shipping a compiled binary with no source, whether the
 
 **The rest of this repository is MIT-licensed; parts under `3d-printing/`
 aren't necessarily.** Every part here so far *is* MIT (see each part's
-own README for why, where it matters -- `sensors_enclosure/`, for instance,
-was inspired by a CC BY-NC-SA 4.0 design but built from scratch, not
-modified from that design's own files, which is what keeps it clear of
-that license's obligations). But that won't always be true: 3D-printable
+own README for why, where it matters). But that won't always be true: 3D-printable
 designs can easily start as an actual modification of someone else's
 Creative-Commons-licensed model instead of a fresh build, in which case
 that part's directory would carry the original's license forward, not
