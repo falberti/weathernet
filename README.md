@@ -561,3 +561,12 @@ to wait for the next tick.
 
 See [`server/README.md`](server/README.md) and
 [`probe/README.md`](probe/README.md) for component-specific detail.
+
+## License
+
+This repository is [MIT-licensed](LICENSE), including everything under
+[`3d-printing/`](3d-printing/) so far. That said, 3D-printable designs there
+could in principle start from or modify someone else's
+differently-licensed model in the future -- check each part's own
+`LICENSE`/`README.md` before reusing it if one exists (see
+[`3d-printing/README.md`](3d-printing/README.md) for the convention).
