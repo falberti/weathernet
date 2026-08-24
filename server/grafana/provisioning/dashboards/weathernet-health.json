@@ -2,44 +2,73 @@
   "id": null,
   "uid": "weathernet-health",
   "title": "WeatherNet Health",
-  "tags": ["weathernet"],
+  "tags": [
+    "weathernet"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 7,
+  "version": 8,
   "refresh": "1m",
-  "time": { "from": "now-24h", "to": "now" },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
       "type": "table",
       "title": "Probe Registry",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "targets": [
         {
           "refId": "A",
           "format": "table",
           "rawSql": "SELECT name, hardware_type, is_active, last_seen_at FROM probes_probe ORDER BY last_seen_at DESC NULLS LAST;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "CPU Temperature per Probe",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "title": "CPU Temperature",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "celsius" },
+        "defaults": {
+          "unit": "celsius"
+        },
         "overrides": []
       },
       "targets": [
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT h.time AS \"time\", p.name AS metric, h.cpu_temp_c AS value FROM telemetry_probehealth h JOIN probes_probe p ON p.id = h.probe_id WHERE $__timeFilter(h.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT h.time AS \"time\", p.name AS metric, h.cpu_temp_c AS value FROM telemetry_probehealth h JOIN probes_probe p ON p.id = h.probe_id WHERE $__timeFilter(h.time) AND p.name = '$probe' ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -47,18 +76,31 @@
       "id": 3,
       "type": "timeseries",
       "title": "Temperature",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "celsius" },
+        "defaults": {
+          "unit": "celsius"
+        },
         "overrides": []
       },
       "targets": [
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'temperature_c' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'temperature_c' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -66,18 +108,33 @@
       "id": 4,
       "type": "timeseries",
       "title": "Humidity",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "percent", "min": 0, "max": 100 },
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
         "overrides": []
       },
       "targets": [
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'humidity_pct' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'humidity_pct' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -85,18 +142,31 @@
       "id": 5,
       "type": "timeseries",
       "title": "Pressure",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "pressurehpa" },
+        "defaults": {
+          "unit": "pressurehpa"
+        },
         "overrides": []
       },
       "targets": [
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'pressure_hpa' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'pressure_hpa' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -104,18 +174,31 @@
       "id": 6,
       "type": "timeseries",
       "title": "Gas Resistance (uncalibrated -- higher is generally cleaner air)",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "ohm" },
+        "defaults": {
+          "unit": "ohm"
+        },
         "overrides": []
       },
       "targets": [
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'gas_resistance_ohm' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'gas_resistance_ohm' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -124,8 +207,16 @@
       "type": "gauge",
       "title": "Air Quality Index (EPA, PM2.5/PM10)",
       "description": "The real US EPA AQI (Table 6, document.airnow.gov, current as of the May 2024 PM2.5 revision) -- not a heuristic. GREATEST of the PM2.5 and PM10 sub-indices, matching EPA's own \"report the worst pollutant\" methodology; whichever of the two has no data is ignored, not treated as zero. PM1.0/PM4.0 have no EPA breakpoints, so they're not folded in here -- see their own concentration gauges below. Blank on a probe with no SPS30 (e.g. BME680-only) -- see the Gas Resistance panel for that case instead; probes/aqi.py's compute_overall_air_quality_index is the source of truth this mirrors.",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
@@ -134,12 +225,30 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 51 },
-              { "color": "orange", "value": 101 },
-              { "color": "red", "value": 151 },
-              { "color": "purple", "value": 201 },
-              { "color": "dark-red", "value": 301 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 51
+              },
+              {
+                "color": "orange",
+                "value": 101
+              },
+              {
+                "color": "red",
+                "value": 151
+              },
+              {
+                "color": "purple",
+                "value": 201
+              },
+              {
+                "color": "dark-red",
+                "value": 301
+              }
             ]
           }
         },
@@ -149,8 +258,11 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "WITH latest_pm25 AS (\n  SELECT r.value AS pm25 FROM telemetry_sensorreading r\n  WHERE r.sensor_type = 'sps30_pm2_5_ug_m3' ORDER BY r.time DESC LIMIT 1\n),\nlatest_pm10 AS (\n  SELECT r.value AS pm10 FROM telemetry_sensorreading r\n  WHERE r.sensor_type = 'sps30_pm10_ug_m3' ORDER BY r.time DESC LIMIT 1\n)\nSELECT GREATEST(\n  (SELECT CASE\n    WHEN pm25 IS NULL THEN NULL\n    WHEN pm25 <= 9.0   THEN round(((50.0-0.0)/(9.0-0.0)) * (pm25-0.0) + 0)\n    WHEN pm25 <= 35.4  THEN round(((100.0-51.0)/(35.4-9.1)) * (pm25-9.1) + 51)\n    WHEN pm25 <= 55.4  THEN round(((150.0-101.0)/(55.4-35.5)) * (pm25-35.5) + 101)\n    WHEN pm25 <= 125.4 THEN round(((200.0-151.0)/(125.4-55.5)) * (pm25-55.5) + 151)\n    WHEN pm25 <= 225.4 THEN round(((300.0-201.0)/(225.4-125.5)) * (pm25-125.5) + 201)\n    ELSE round(((500.0-301.0)/(325.4-225.5)) * (pm25-225.5) + 301)\n  END FROM latest_pm25),\n  (SELECT CASE\n    WHEN pm10 IS NULL THEN NULL\n    WHEN pm10 <= 54  THEN round(((50.0-0.0)/(54.0-0.0)) * (pm10-0.0) + 0)\n    WHEN pm10 <= 154 THEN round(((100.0-51.0)/(154.0-55.0)) * (pm10-55.0) + 51)\n    WHEN pm10 <= 254 THEN round(((150.0-101.0)/(254.0-155.0)) * (pm10-155.0) + 101)\n    WHEN pm10 <= 354 THEN round(((200.0-151.0)/(354.0-255.0)) * (pm10-255.0) + 151)\n    WHEN pm10 <= 424 THEN round(((300.0-201.0)/(424.0-355.0)) * (pm10-355.0) + 201)\n    ELSE round(((500.0-301.0)/(604.0-425.0)) * (pm10-425.0) + 301)\n  END FROM latest_pm10)\n) AS \"Air Quality Index\";",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "WITH latest_pm25 AS (\n  SELECT r.value AS pm25 FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id\n  WHERE r.sensor_type = 'sps30_pm2_5_ug_m3' AND p.name = '$probe' ORDER BY r.time DESC LIMIT 1\n),\nlatest_pm10 AS (\n  SELECT r.value AS pm10 FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id\n  WHERE r.sensor_type = 'sps30_pm10_ug_m3' AND p.name = '$probe' ORDER BY r.time DESC LIMIT 1\n)\nSELECT GREATEST(\n  (SELECT CASE\n    WHEN pm25 IS NULL THEN NULL\n    WHEN pm25 <= 9.0   THEN round(((50.0-0.0)/(9.0-0.0)) * (pm25-0.0) + 0)\n    WHEN pm25 <= 35.4  THEN round(((100.0-51.0)/(35.4-9.1)) * (pm25-9.1) + 51)\n    WHEN pm25 <= 55.4  THEN round(((150.0-101.0)/(55.4-35.5)) * (pm25-35.5) + 101)\n    WHEN pm25 <= 125.4 THEN round(((200.0-151.0)/(125.4-55.5)) * (pm25-55.5) + 151)\n    WHEN pm25 <= 225.4 THEN round(((300.0-201.0)/(225.4-125.5)) * (pm25-125.5) + 201)\n    ELSE round(((500.0-301.0)/(325.4-225.5)) * (pm25-225.5) + 301)\n  END FROM latest_pm25),\n  (SELECT CASE\n    WHEN pm10 IS NULL THEN NULL\n    WHEN pm10 <= 54  THEN round(((50.0-0.0)/(54.0-0.0)) * (pm10-0.0) + 0)\n    WHEN pm10 <= 154 THEN round(((100.0-51.0)/(154.0-55.0)) * (pm10-55.0) + 51)\n    WHEN pm10 <= 254 THEN round(((150.0-101.0)/(254.0-155.0)) * (pm10-155.0) + 101)\n    WHEN pm10 <= 354 THEN round(((200.0-151.0)/(354.0-255.0)) * (pm10-255.0) + 151)\n    WHEN pm10 <= 424 THEN round(((300.0-201.0)/(424.0-355.0)) * (pm10-355.0) + 201)\n    ELSE round(((500.0-301.0)/(604.0-425.0)) * (pm10-425.0) + 301)\n  END FROM latest_pm10)\n) AS \"Air Quality Index\";",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -159,8 +271,16 @@
       "type": "gauge",
       "title": "PM1.0",
       "description": "Mass concentration, µg/m³. EPA defines no official AQI breakpoints for this size fraction (only PM2.5 and PM10 -- see the combined Air Quality Index gauge above), so this is a raw reading with informal color bands only, not an index.",
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 56 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 56
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "µg/m³",
@@ -169,9 +289,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 10 },
-              { "color": "orange", "value": 25 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "orange",
+                "value": 25
+              }
             ]
           }
         },
@@ -181,8 +310,11 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT r.value FROM telemetry_sensorreading r WHERE r.sensor_type = 'sps30_pm1_0_ug_m3' ORDER BY r.time DESC LIMIT 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm1_0_ug_m3' AND p.name = '$probe' ORDER BY r.time DESC LIMIT 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -191,8 +323,16 @@
       "type": "gauge",
       "title": "PM2.5",
       "description": "Mass concentration, µg/m³ -- this is the raw reading behind the PM2.5 half of the Air Quality Index gauge above; see that panel for the actual EPA index/category.",
-      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 56 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 56
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "µg/m³",
@@ -201,9 +341,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 9.1 },
-              { "color": "orange", "value": 35.5 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 9.1
+              },
+              {
+                "color": "orange",
+                "value": 35.5
+              }
             ]
           }
         },
@@ -213,8 +362,11 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT r.value FROM telemetry_sensorreading r WHERE r.sensor_type = 'sps30_pm2_5_ug_m3' ORDER BY r.time DESC LIMIT 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm2_5_ug_m3' AND p.name = '$probe' ORDER BY r.time DESC LIMIT 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -223,8 +375,16 @@
       "type": "gauge",
       "title": "PM4.0",
       "description": "Mass concentration, µg/m³. EPA defines no official AQI breakpoints for this size fraction (only PM2.5 and PM10 -- see the combined Air Quality Index gauge above), so this is a raw reading with informal color bands only, not an index.",
-      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 56 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 56
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "µg/m³",
@@ -233,9 +393,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 20 },
-              { "color": "orange", "value": 50 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 20
+              },
+              {
+                "color": "orange",
+                "value": 50
+              }
             ]
           }
         },
@@ -245,8 +414,11 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT r.value FROM telemetry_sensorreading r WHERE r.sensor_type = 'sps30_pm4_0_ug_m3' ORDER BY r.time DESC LIMIT 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm4_0_ug_m3' AND p.name = '$probe' ORDER BY r.time DESC LIMIT 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -255,8 +427,16 @@
       "type": "gauge",
       "title": "PM10",
       "description": "Mass concentration, µg/m³ -- this is the raw reading behind the PM10 half of the Air Quality Index gauge above; see that panel for the actual EPA index/category.",
-      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 56 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 56
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "µg/m³",
@@ -265,9 +445,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 55 },
-              { "color": "orange", "value": 155 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "orange",
+                "value": 155
+              }
             ]
           }
         },
@@ -277,8 +466,11 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT r.value FROM telemetry_sensorreading r WHERE r.sensor_type = 'sps30_pm10_ug_m3' ORDER BY r.time DESC LIMIT 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm10_ug_m3' AND p.name = '$probe' ORDER BY r.time DESC LIMIT 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -287,16 +479,35 @@
       "type": "timeseries",
       "title": "BMP280 Temperature vs. Pressure",
       "description": "Chip-specific sensor_type values (bmp280_temperature_c / bmp280_pressure_hpa) so this stays distinct from BME680/HTU21D-F readings on the same probe -- see the README's BMP280/HTU21D-F/SPS30 wiring section.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "celsius" },
+        "defaults": {
+          "unit": "celsius"
+        },
         "overrides": [
           {
-            "matcher": { "id": "byRegexp", "options": "/pressure/" },
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/pressure/"
+            },
             "properties": [
-              { "id": "unit", "value": "pressurehpa" },
-              { "id": "custom.axisPlacement", "value": "right" }
+              {
+                "id": "unit",
+                "value": "pressurehpa"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
             ]
           }
         ]
@@ -305,14 +516,20 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name || ' temperature' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'bmp280_temperature_c' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name || ' temperature' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'bmp280_temperature_c' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         },
         {
           "refId": "B",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name || ' pressure' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'bmp280_pressure_hpa' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name || ' pressure' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'bmp280_pressure_hpa' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -321,18 +538,43 @@
       "type": "timeseries",
       "title": "HTU21D-F Temperature vs. Humidity",
       "description": "Chip-specific sensor_type values (htu21d_temperature_c / htu21d_humidity_pct) so this stays distinct from BME680/BMP280 readings on the same probe -- see the README's BMP280/HTU21D-F/SPS30 wiring section.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "celsius" },
+        "defaults": {
+          "unit": "celsius"
+        },
         "overrides": [
           {
-            "matcher": { "id": "byRegexp", "options": "/humidity/" },
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/humidity/"
+            },
             "properties": [
-              { "id": "unit", "value": "percent" },
-              { "id": "custom.axisPlacement", "value": "right" },
-              { "id": "min", "value": 0 },
-              { "id": "max", "value": 100 }
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              }
             ]
           }
         ]
@@ -341,14 +583,20 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name || ' temperature' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'htu21d_temperature_c' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name || ' temperature' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'htu21d_temperature_c' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         },
         {
           "refId": "B",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name || ' humidity' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'htu21d_humidity_pct' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name || ' humidity' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'htu21d_humidity_pct' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -357,36 +605,59 @@
       "type": "timeseries",
       "title": "Particulate Matter (SPS30)",
       "description": "Mass concentration by particle size, from the SPS30. Readings are absent for the sensor's ~10s warm-up window after every probe (re)start -- see the README's SPS30 wiring section.",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 40 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "µg/m³", "min": 0 },
+        "defaults": {
+          "unit": "µg/m³",
+          "min": 0
+        },
         "overrides": []
       },
       "targets": [
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name || ' PM1.0' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm1_0_ug_m3' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name || ' PM1.0' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm1_0_ug_m3' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         },
         {
           "refId": "B",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name || ' PM2.5' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm2_5_ug_m3' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name || ' PM2.5' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm2_5_ug_m3' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         },
         {
           "refId": "C",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name || ' PM4.0' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm4_0_ug_m3' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name || ' PM4.0' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm4_0_ug_m3' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         },
         {
           "refId": "D",
           "format": "time_series",
-          "rawSql": "SELECT r.time AS \"time\", p.name || ' PM10' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm10_ug_m3' AND $__timeFilter(r.time) ORDER BY 1;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT r.time AS \"time\", p.name || ' PM10' AS metric, r.value AS value FROM telemetry_sensorreading r JOIN probes_probe p ON p.id = r.probe_id WHERE r.sensor_type = 'sps30_pm10_ug_m3' AND p.name = '$probe' AND $__timeFilter(r.time) ORDER BY 1;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     },
@@ -395,23 +666,43 @@
       "type": "table",
       "title": "Power Health (Raspberry Pi undervoltage)",
       "description": "From `vcgencmd get_throttled` on each probe (weathernet_probe/health.py). 'now' is the instant of the last report; 'occurred' is sticky since that probe's last reboot, so it also catches a brief brownout (e.g. a sensor's fan inrush current) between two reporting cycles that 'now' would likely miss. Null on non-Pi hardware or if vcgencmd isn't available. No alert rule is provisioned -- add one manually in Grafana pointed at this panel's query if you want a notification, not just a place to look during troubleshooting.",
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 48 },
-      "datasource": { "type": "postgres", "uid": "weathernet_postgres" },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "weathernet_postgres"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "undervoltage_now" },
+            "matcher": {
+              "id": "byName",
+              "options": "undervoltage_now"
+            },
             "properties": [
-              { "id": "custom.displayMode", "value": "color-background" },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
               {
                 "id": "mappings",
                 "value": [
                   {
                     "type": "value",
                     "options": {
-                      "true": { "text": "under-voltage now", "color": "red" },
-                      "false": { "text": "ok", "color": "green" }
+                      "true": {
+                        "text": "under-voltage now",
+                        "color": "red"
+                      },
+                      "false": {
+                        "text": "ok",
+                        "color": "green"
+                      }
                     }
                   }
                 ]
@@ -419,17 +710,29 @@
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "undervoltage_occurred" },
+            "matcher": {
+              "id": "byName",
+              "options": "undervoltage_occurred"
+            },
             "properties": [
-              { "id": "custom.displayMode", "value": "color-background" },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
               {
                 "id": "mappings",
                 "value": [
                   {
                     "type": "value",
                     "options": {
-                      "true": { "text": "occurred since reboot", "color": "orange" },
-                      "false": { "text": "ok", "color": "green" }
+                      "true": {
+                        "text": "occurred since reboot",
+                        "color": "orange"
+                      },
+                      "false": {
+                        "text": "ok",
+                        "color": "green"
+                      }
                     }
                   }
                 ]
@@ -442,10 +745,32 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT DISTINCT ON (p.id) p.name, h.undervoltage_now, h.undervoltage_occurred, h.time AS last_health_at FROM telemetry_probehealth h JOIN probes_probe p ON p.id = h.probe_id ORDER BY p.id, h.time DESC;",
-          "datasource": { "type": "postgres", "uid": "weathernet_postgres" }
+          "rawSql": "SELECT DISTINCT ON (p.id) p.name, h.undervoltage_now, h.undervoltage_occurred, h.time AS last_health_at FROM telemetry_probehealth h JOIN probes_probe p ON p.id = h.probe_id WHERE p.name = '$probe' ORDER BY p.id, h.time DESC;",
+          "datasource": {
+            "type": "postgres",
+            "uid": "weathernet_postgres"
+          }
         }
       ]
     }
-  ]
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "probe",
+        "type": "query",
+        "label": "Probe",
+        "datasource": {
+          "type": "postgres",
+          "uid": "weathernet_postgres"
+        },
+        "query": "SELECT name FROM probes_probe ORDER BY name;",
+        "refresh": 1,
+        "sort": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {}
+      }
+    ]
+  }
 }
