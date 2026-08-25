@@ -1,7 +1,7 @@
 # Stevenson-screen-style radiation shield for SPS30 + BMP280 + HTU21D-F
 
 Overall envelope **197 × 145 × 154 mm** (bracket included). Shield Ø 145.5 mm, height 154 mm.
-Material **ASA**. Estimated mass ~229 g at 35% infill.
+Material **ASA**. Estimated mass ~239 g at 35% infill.
 
 ## Why it's built this way
 
@@ -38,6 +38,8 @@ to 1 mm above the opening's top edge.
 | `pm_body` | 1 | 114 × 109 × 58 | upright, base on the bed |
 | `pm_lid` | 1 | 146 × 146 × 14 | **upside down**, roof on the bed |
 | `sensor_carrier` | 1 | 60 × 17 × 64 | on its side, panel on the bed |
+| `cable_hub` | 1 | Ø83 × 2 | flat on the bed |
+| `conduit_plate` | 1 | Ø110 × 7 | flat on the bed |
 
 In these orientations, unsupported overhangs are ≤ 4% of the area and are only
 short bridges (opening's ceiling, louver slots, slots): **no supports needed**.
@@ -49,7 +51,7 @@ All dimensions taken from the current model, not from memory.
 
 | # | Item | Qty | Where it goes |
 |---|---|---|---|
-| 1 | M4 stainless threaded rod, **170 mm** | 3 | Through the 3 boss columns, bottom to top |
+| 1 | M4 stainless threaded rod, **180 mm** | 3 | Through the 3 boss columns, bottom to top |
 | 1 | M4 nyloc nut + washer | 6 | 3 under the lowest bosses, 3 on top of the roof |
 | 2 | **M3 x 12** self-tapping screw | 2 | From above, through the partition at x = +/-21, into the carrier tabs |
 | 3 | 2.5 mm cable tie | 4 | Two per breakout board, looped vertically through the 3.5 x 2.0 mm slots |
@@ -60,11 +62,14 @@ All dimensions taken from the current model, not from memory.
 | 8 | Insect mesh strip, **13 x 285 mm** | 1 | Annular seat inside the PM module, behind the vent slots |
 | 9 | Rubber cable gland, **O13 mm** (split type) | 1 | Partition hole at (0, -18) |
 | 10 | Foam, 1 mm | 2 | One strip behind the SPS30, one pad under the lid rib |
+| 11 | 2.5 mm cable tie | 2 | One per Cat5e, through the paired slots in `cable_hub` (strain relief) |
+| 12 | **M25** conduit-to-box fitting | 1 | Ø25.4 hole in `conduit_plate`, ring nut on top |
+| 13 | **Ø25** corrugated conduit | 1 | From the fitting down the mast to the Raspberry Pi |
 
 Notes on sizing:
 
 - **Rod length.** Clamped stack is 154.2 mm (lowest boss to roof top). Adding a washer,
-  a nyloc nut and 2 mm of thread at each end gives 170 mm. Cut three from a 1 m rod.
+  a nyloc nut and 2 mm of thread at each end gives 180 mm. Cut three from a 1 m rod.
 - **Washers.** The bosses are only O11, so the bottom washers must be standard DIN 125
   (O9). Wide washers only fit on top, where they bear on the flat roof.
 - **M3 length.** 2.6 mm of partition + 8 mm of engagement in the carrier tab = 10.6 mm.
@@ -95,11 +100,55 @@ unobstructed; a screen in front clogs and crops the large particles, skewing PM1
 the sensor keeps returning plausible numbers. Leave the four 1.6 mm drain notches open
 too, or they stop draining.
 
+## Cable routing
+
+Two Cat5e cables leave the shield downwards: one for the SPS30 on **UART**, one
+shared by BMP280 and HTU21D-F on I2C. Sensirion recommends UART for any connection
+cable longer than 20 cm, and warns to keep I2C runs under 10 cm, so the PM sensor
+gets the robust link and only the two low-rate sensors share a bus.
+Set `N_CABLE` in the macro if you want three instead.
+
+- **SPS30** is the only cable that crosses the partition: down through the Ø13 split
+  gland at (0, -18), into the T/RH chamber.
+- **BMP280** and **HTU21D-F** are already below the partition and drop straight down.
+- All two leave through `cable_hub`, a Ø83 disc resting in the Ø83.4 rebate of the
+  lowest louver plate. `N_CABLE` Ø6.6 holes (snug on 5.0-5.5 mm Cat5e), a pair of slots
+  beside each hole for a cable-tie strain relief, and three openings that keep 44% of
+  the bottom aperture free for airflow.
+- The mesh basket sits on top of the hub, so the mesh itself is never pierced: the hub
+  is the single crossing point and the cables seal it themselves.
+
+### Conduit
+
+`conduit_plate` sits under the lowest louver plate and is clamped by the same three tie
+rods, so the conduit is anchored to the structure and not hanging off the cables. It
+carries a Ø25.4 hole for an **M25 conduit-to-box fitting**, on a 4 mm conical weir, so water
+would have to pond more than 4 mm deep across the whole plate to reach it, plus three openings and three ribs.
+
+**Size:** with two cables, Ø20 works: rigid Ø20 (16.9 mm bore) is fine up to Ø6.5 mm
+cable, corrugated Ø20 (14.1 mm bore) only up to Ø5.5. Measure your cable first.
+
+Drill a small **weep hole at the lowest point of the conduit run**: whatever gets in at either end leaves there. This, not the choice of exit point, is what keeps the Pi dry.
+
+**The conduit must run downwards the whole way.** Do not take it up over the shield: the
+shield would become the high point and every drop of rain or condensate inside the
+conduit would drain into the Pi. End the conduit *below* the Raspberry Pi enclosure,
+open and facing down so it drains, and bring the cables up into a gland on the bottom
+of the box.
+
+Leave slack outside for a **drip loop** — the lowest point of each cable must be clear
+of the shield, so water drips there instead of tracking up into the housing. Tie the
+cables to the mast below the loop, then run them to the Raspberry Pi enclosure.
+
+The T/RH chamber is ventilated by design, so these holes do not need to be watertight;
+they only need to keep insects out.
+
 ## Assembly
 
 1. Thread the 3 rods; stack from the bottom: nut + washer, 5 `louver` plates,
    `plate_partition`. The built-in bosses set the 15.6 mm pitch on their own.
-2. Drop the mesh basket into the central aperture before the partition goes on.
+2. Drop `cable_hub` into the rebate of the lowest plate, then the mesh basket on top
+   of it, before the partition goes on.
 3. Mount BMP280 and HTU21D-F on the `sensor_carrier`: they sit on the four 3 mm
    standoffs (air on both faces), one cable tie per board holds them. STEMMA QT
    connectors stay clear on the short sides.
@@ -113,6 +162,8 @@ too, or they stop draining.
 8. Drop the two M6 bolts into the hex pockets from inside, while the lid is still off.
 9. Close with `pm_lid` (1 mm foam pad under the internal rib). Nyloc nuts on top of the
    roof, snug only.
+10. Pull the two Cat5e cables through `cable_hub`, one cable tie each as strain
+    relief, and form the drip loop before running them to the Raspberry Pi.
 
 Point the port opening **away from the mast and from prevailing rain-bearing winds**.
 
