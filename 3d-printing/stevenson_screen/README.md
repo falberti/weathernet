@@ -38,8 +38,8 @@ to 1 mm above the opening's top edge.
 | `pm_body` | 1 | 114 × 109 × 58 | upright, base on the bed |
 | `pm_lid` | 1 | 146 × 146 × 14 | **upside down**, roof on the bed |
 | `sensor_carrier` | 1 | 60 × 17 × 64 | on its side, panel on the bed |
-| `cable_hub` | 1 | Ø83 × 2 | flat on the bed |
-| `conduit_plate` | 1 | Ø110 × 7 | flat on the bed |
+| `cable_hub` | 1 | Ø120 × 4 | flat on the bed |
+| `conduit_plate` | 1 | Ø120 × 7 | flat on the bed |
 
 In these orientations, unsupported overhangs are ≤ 4% of the area and are only
 short bridges (opening's ceiling, louver slots, slots): **no supports needed**.
@@ -62,7 +62,7 @@ All dimensions taken from the current model, not from memory.
 | 8 | Insect mesh strip, **13 x 285 mm** | 1 | Annular seat inside the PM module, behind the vent slots |
 | 9 | Rubber cable gland, **O13 mm** (split type) | 1 | Partition hole at (0, -18) |
 | 10 | Foam, 1 mm | 2 | One strip behind the SPS30, one pad under the lid rib |
-| 11 | 2.5 mm cable tie | 2 | One per Cat5e, through the paired slots in `cable_hub` (strain relief) |
+| 11 | **PG7** cable gland | 2 | In `cable_hub`, Ø12.5 holes 34 mm apart. Body underneath, locknut on top; fit before stacking plate 2 |
 | 12 | **M25** conduit-to-box fitting | 1 | Ø25.4 hole in `conduit_plate`, ring nut on top |
 | 13 | **Ø25** corrugated conduit | 1 | From the fitting down the mast to the Raspberry Pi |
 
@@ -111,8 +111,9 @@ Set `N_CABLE` in the macro if you want three instead.
 - **SPS30** is the only cable that crosses the partition: down through the Ø13 split
   gland at (0, -18), into the T/RH chamber.
 - **BMP280** and **HTU21D-F** are already below the partition and drop straight down.
-- All two leave through `cable_hub`, a Ø83 disc resting in the Ø83.4 rebate of the
-  lowest louver plate. `N_CABLE` Ø6.6 holes (snug on 5.0-5.5 mm Cat5e), a pair of slots
+- All two leave through `cable_hub`, a Ø120 disc that sits on the top face of the lowest
+  louver plate and is clamped by the bosses of the plate above, on the same three tie
+  rods. It is not just resting. `N_CABLE` Ø6.6 holes (snug on 5.0-5.5 mm Cat5e), a pair of slots
   beside each hole for a cable-tie strain relief, and three openings that keep 44% of
   the bottom aperture free for airflow.
 - The mesh basket sits on top of the hub, so the mesh itself is never pierced: the hub
