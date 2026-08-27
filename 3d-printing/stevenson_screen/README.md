@@ -33,8 +33,8 @@ to 1 mm above the opening's top edge.
 
 | STL file | Qty | Envelope | Print orientation |
 |---|---|---|---|
-| `louver` | 5 | 146 × 146 × 16 | **upside down**, flat face on the bed |
-| `plate_partition` | 1 | 146 × 146 × 17 | **upside down**, flat face on the bed |
+| `louver` | 7 | 146 × 146 × 16 | **upside down**, flat face on the bed |
+| `partition` | 1 | 146 × 146 × 17 | **upside down**, flat face on the bed |
 | `pm_body` | 1 | 114 × 109 × 58 | upright, base on the bed |
 | `pm_lid` | 1 | 146 × 146 × 14 | **upside down**, roof on the bed |
 | `sensor_carrier` | 1 | 60 × 17 × 64 | on its side, panel on the bed |
@@ -146,7 +146,7 @@ they only need to keep insects out.
 ## Assembly
 
 1. Thread the 3 rods; stack from the bottom: nut + washer, 5 `louver` plates,
-   `plate_partition`. The built-in bosses set the 15.6 mm pitch on their own.
+   `partition`. The built-in bosses set the 15.6 mm pitch on their own.
 2. Drop `cable_hub` into the rebate of the lowest plate, then the mesh basket on top
    of it, before the partition goes on.
 3. Mount BMP280 and HTU21D-F on the `sensor_carrier`: they sit on the four 3 mm
