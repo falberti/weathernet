@@ -44,3 +44,23 @@ class ProbeHealth(models.Model):
     # cycles would very likely be missed by `_now` alone.
     undervoltage_now = models.BooleanField(null=True, blank=True)
     undervoltage_occurred = models.BooleanField(null=True, blank=True)
+
+
+class SensorHealthAlert(models.Model):
+    """Tracks an open "sensor not reporting" Telegram alert for one
+    (probe, sensor_type) pair -- see
+    management/commands/check_sensor_health.py. A row here means an
+    alert has been sent and not yet resolved; it's deleted (after a
+    "recovered" message) the moment that sensor reports again, so this
+    is current state, not a log of past alerts.
+    """
+
+    probe = models.ForeignKey(Probe, on_delete=models.CASCADE)
+    sensor_type = models.CharField(max_length=64)
+    alerted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("probe", "sensor_type")]
+
+    def __str__(self):
+        return f"{self.probe.name}: {self.sensor_type} (since {self.alerted_at})"

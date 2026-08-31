@@ -47,6 +47,10 @@ services:
       # telegram-bot service below is what actually talks to visitors.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       SUBSCRIPTION_MAX_DISTANCE_KM: ${SUBSCRIPTION_MAX_DISTANCE_KM}
+      # Sensor-health alerts (telemetry app): only `manage.py
+      # check_sensor_health`, run the same way as the digest above.
+      TELEGRAM_ALERT_CHAT_ID: ${TELEGRAM_ALERT_CHAT_ID}
+      SENSOR_STALE_ALERT_MINUTES: ${SENSOR_STALE_ALERT_MINUTES}
     volumes:
       # Read-only. The CA key is the one meaningful new attack-surface
       # trade-off enrollment introduces -- signing CSRs synchronously

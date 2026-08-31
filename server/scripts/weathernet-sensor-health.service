@@ -1,0 +1,9 @@
+[Unit]
+Description=WeatherNet sensor-health check
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__SERVER_DIR__
+ExecStart=__SERVER_DIR__/scripts/check-sensor-health.sh

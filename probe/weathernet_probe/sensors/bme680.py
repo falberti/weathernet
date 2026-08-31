@@ -39,6 +39,41 @@ _device_lock = threading.Lock()
 _GAS_HEATER_TEMPERATURE_C = 320
 _GAS_HEATER_DURATION_MS = 150
 
+# Bosch's own operating range (BME680 datasheet, "Operating Range" --
+# same pressure/temperature/humidity range as the BMP280 in this
+# codebase, since both are Bosch's environmental-sensor line and share
+# the same underlying spec): a reading outside these bounds cannot be a
+# real measurement regardless of actual weather -- it's a corrupted
+# read (e.g. an I2C bit error) that happened to compensate into a
+# plausible-looking number. See bmp280.py's docstring for the concrete
+# incident (a corrupted read once produced a silently-wrong 180C) this
+# same class of check guards against.
+_TEMPERATURE_RANGE_C = (-40.0, 85.0)
+_PRESSURE_RANGE_HPA = (300.0, 1100.0)
+_HUMIDITY_RANGE_PCT = (0.0, 100.0)
+
+# Gas resistance has no datasheet operating range -- it's an
+# uncalibrated, air-quality-dependent output (see
+# BME680GasResistanceSensor's docstring below), not a physical quantity
+# with fixed bounds like temperature/pressure/humidity. This is a pure
+# corruption sanity check, not a calibrated range: real readings seen
+# in practice span roughly 1 kOhm (polluted air) to the low hundreds of
+# kOhm (clean air), so anything non-positive or absurdly large (a
+# corrupted read producing a huge exponent) is rejected without
+# claiming any real upper limit on clean-air resistance.
+_GAS_RESISTANCE_SANITY_RANGE_OHM = (1.0, 10_000_000.0)
+
+
+def _check_plausible(value: float, value_range: tuple, label: str, unit: str) -> float:
+    low, high = value_range
+    if not (low <= value <= high):
+        raise SensorReadError(
+            f"BME680 {label} reading {value}{unit} is outside the sensor's plausible range "
+            f"({low}..{high}{unit}) -- treating as a corrupted read, not a real measurement"
+        )
+    return value
+
+
 # One forced-mode conversion produces all four values at once. Our four
 # Sensor subclasses each call _read_all() independently, so without
 # caching, one reporting cycle triggers four separate hardware
@@ -99,7 +134,8 @@ class BME680TemperatureSensor(Sensor):
     unit = "c"
 
     def read(self) -> float:
-        return round(_read_all().temperature, 2)
+        value = round(_read_all().temperature, 2)
+        return _check_plausible(value, _TEMPERATURE_RANGE_C, "temperature", "C")
 
 
 class BME680HumiditySensor(Sensor):
@@ -107,7 +143,8 @@ class BME680HumiditySensor(Sensor):
     unit = "pct"
 
     def read(self) -> float:
-        return round(_read_all().humidity, 2)
+        value = round(_read_all().humidity, 2)
+        return _check_plausible(value, _HUMIDITY_RANGE_PCT, "humidity", "%")
 
 
 class BME680PressureSensor(Sensor):
@@ -115,7 +152,8 @@ class BME680PressureSensor(Sensor):
     unit = "hpa"
 
     def read(self) -> float:
-        return round(_read_all().pressure, 2)
+        value = round(_read_all().pressure, 2)
+        return _check_plausible(value, _PRESSURE_RANGE_HPA, "pressure", "hPa")
 
 
 class BME680GasResistanceSensor(Sensor):
@@ -132,4 +170,5 @@ class BME680GasResistanceSensor(Sensor):
         data = _read_all()
         if not data.heat_stable:
             raise SensorReadError("BME680 gas heater not yet stable this cycle")
-        return round(data.gas_resistance, 2)
+        value = round(data.gas_resistance, 2)
+        return _check_plausible(value, _GAS_RESISTANCE_SANITY_RANGE_OHM, "gas resistance", "ohm")

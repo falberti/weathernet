@@ -274,8 +274,11 @@ weathernet/
 │   │   ├── telemetry/              # app: ingestion API + hypertable models
 │   │   │   ├── views.py
 │   │   │   ├── serializers.py
-│   │   │   ├── models.py            # SensorReading / ProbeHealth (hypertables)
-│   │   │   └── urls.py
+│   │   │   ├── models.py            # SensorReading / ProbeHealth (hypertables) + SensorHealthAlert (see 5.10)
+│   │   │   ├── urls.py
+│   │   │   ├── management/commands/
+│   │   │   │   └── check_sensor_health.py  # run every 15min by a systemd timer, see 5.10
+│   │   │   └── migrations/
 │   │   ├── subscriptions/          # app: Telegram daily-digest bot (see 5.9)
 │   │   │   ├── models.py            # WeatherSubscription
 │   │   │   ├── bot.py               # command/conversation dispatch
@@ -296,7 +299,9 @@ weathernet/
 │   │   ├── setup.sh
 │   │   ├── deploy.sh
 │   │   ├── send-daily-digest.sh                    # docker compose exec wrapper -- see 5.9
-│   │   └── weathernet-daily-digest.service/.timer  # installed by setup.sh once TELEGRAM_BOT_TOKEN is set
+│   │   ├── weathernet-daily-digest.service/.timer  # installed by setup.sh once TELEGRAM_BOT_TOKEN is set
+│   │   ├── check-sensor-health.sh                  # docker compose exec wrapper -- see 5.10
+│   │   └── weathernet-sensor-health.service/.timer # installed by setup.sh once TELEGRAM_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID are set
 │   ├── pki/
 │   │   ├── generate-ca.sh           # run once at server setup
 │   │   └── generate-server-cert.sh  # run once at server setup
@@ -708,7 +713,11 @@ building the `t.me/<username>` link shown on `public-page/`),
 `SUBSCRIPTION_MAX_DISTANCE_KM` (default `15`, see 5.9), and
 `NOMINATIM_USER_AGENT` (identifies this application to Nominatim per
 its usage policy — must be a real contact/project URL, not a generic
-placeholder). `.env` itself must be gitignored.
+placeholder). Also `TELEGRAM_ALERT_CHAT_ID` (the operator's own
+chat_id, separate from any subscriber's — empty disables the
+sensor-health check entirely, see 5.10) and
+`SENSOR_STALE_ALERT_MINUTES` (default `60`). `.env` itself must be
+gitignored.
 
 The server's own WireGuard keypair is **not** an env var — like the mTLS
 CA, it's a generated file (`wireguard/server_private.key`,
@@ -1092,6 +1101,49 @@ defended against beyond what's above; not worth more machinery at this
 project's scale, but worth being honest that these two limits raise
 the bar rather than eliminate the risk entirely.
 
+### 5.10 Sensor-Health Alerts (`telemetry` app)
+
+An operational alert, not a subscriber feature: one fixed Telegram
+recipient (`TELEGRAM_ALERT_CHAT_ID`, the operator's own chat_id — get
+it from @userinfobot or similar) gets a message when a sensor stops
+reporting fresh data, reusing the same bot/`send_message()` as the
+daily digest (5.9) but never fanned out to `WeatherSubscription`s.
+
+**Detection (`check_sensor_health`, run every 15 minutes by
+`weathernet-sensor-health.timer`/`.service`, same
+systemd-timer-runs-`docker compose exec` pattern as the digest).** For
+every active probe, for every `sensor_type` it has *ever* reported: if
+its single most recent `SensorReading` is older than
+`SENSOR_STALE_ALERT_MINUTES` (default 60 — deliberately well past the
+probe's `report_interval_seconds` plus however long a normal network
+blip takes to clear the probe's own offline spool, 6.4, so a routine
+hiccup never alerts), send one alert message and record it
+(`SensorHealthAlert`, one row per open alert) so the same failure
+doesn't re-alert every run. The moment that `sensor_type` reports
+again, send a "recovered" message and delete the row. Deactivating a
+probe clears any alert left open for it silently (no recovery
+message) rather than leaving it unresolved forever.
+
+**Deliberately one mechanism for two symptoms.** "A sensor stopped
+working" and "a sensor's reading went out of range" are not
+distinguished here: every real driver already rejects an implausible
+reading before it's ever sent (5.2's sibling change to `probe/`, listed
+in 6.2), so from the server's point of view both failure modes look
+identical — no fresh reading for that `sensor_type`. A probe-wide
+outage (WiFi down, server down for maintenance) surfaces the same way,
+as every one of that probe's sensor types going stale at once — not a
+separate case, and not something this alert needs to resolve itself:
+the probe's own spool (6.4) already replays the backlog once
+connectivity returns, so recovery is automatic once the underlying
+problem clears.
+
+**Known limitation.** Only `sensor_type`s that have reported at least
+once for a given probe within the last 30 days are checked (a
+performance bound on the aggregate query, not a configurable setting)
+— a sensor that has *never* once reported since a probe was enrolled
+can't be distinguished from "not installed on this probe" and is
+silently not alerted on.
+
 ## 6. Probe Component
 
 ### 6.1 Design constraints
@@ -1130,6 +1182,20 @@ This is the most important structural piece of the probe for future-proofing.
   `htu21d.py`, `sps30.py` — see the README's wiring section for each). A
   wind vane/anemometer and a rain gauge are still **explicitly
   deferred** — see Section 12.
+- **Every real driver validates its own reading against a plausible
+  range before returning it**, raising `SensorReadError` (same failure
+  path as "sensor unreachable" — see 6.4/6.5) rather than passing a
+  corrupted value through. Real incident this guards against: a
+  corrupted SPS30 UART frame once unpacked into tens of thousands of
+  µg/m³ across all four PM channels, spiking the Grafana chart before
+  anyone noticed. Each driver sources its bound honestly rather than
+  guessing: chip datasheet operating range for temperature/pressure/
+  humidity (BME680, BMP280, HTU21D-F — the last one padded a few
+  points past 0/100% for a known, legitimate formula overshoot right at
+  the physical extremes, distinct from actual corruption), Sensirion's
+  own 0-1000 µg/m³ mass-concentration spec for SPS30, and a documented
+  pure sanity floor/ceiling (not a calibrated range) for BME680's
+  uncalibrated gas resistance.
 - `sensors/registry.py` maps a string name (as it appears in the probe's
   YAML config) to a `Sensor` subclass, so which sensors are "active" on a
   given probe is a config change, not a code change. Adding a real driver
@@ -1563,7 +1629,11 @@ Idempotent where reasonably possible. Steps:
     the `telegram-bot` service, re-run this script) rather than failing
     the whole run over an optional feature — a fresh install shouldn't be
     blocked on having a Telegram bot token in hand yet.
-12. Print a summary: URLs for Grafana and Django Admin, and a reminder of
+12. If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALERT_CHAT_ID` are set
+    (5.10), install the `weathernet-sensor-health` systemd service/timer
+    the same way. If either is blank, skip with the same
+    come-back-to-it-later message pattern as step 11.
+13. Print a summary: URLs for Grafana and Django Admin, and a reminder of
     the enrollment flow — "to add a probe, create an `EnrollmentToken` in
     Django Admin; it will print the exact command to run on the probe."
 

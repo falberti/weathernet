@@ -188,6 +188,31 @@ def test_not_ready_within_stale_threshold_raises_without_restarting(monkeypatch)
     assert fake.stop_calls == 0
 
 
+@pytest.mark.parametrize(
+    "sensor_cls,index",
+    [
+        (SPS30PM1_0Sensor, 0),
+        (SPS30PM2_5Sensor, 1),
+        (SPS30PM4_0Sensor, 2),
+        (SPS30PM10Sensor, 3),
+    ],
+)
+def test_reading_above_datasheet_range_is_rejected(monkeypatch, sensor_cls, index):
+    # Real incident this guards against (see the Grafana chart that
+    # prompted it): a corrupted UART frame once unpacked into tens of
+    # thousands of ug/m3 across all four channels -- far beyond
+    # Sensirion's own 0-1000 ug/m3 measurement range -- and silently
+    # spiked the dashboard before anyone noticed.
+    now = time.monotonic()
+    values = [1.0, 2.0, 3.0, 4.0]
+    values[index] = 65000.0
+    fake = _install_fake_device(monkeypatch, started_at=now - sps30._WARMUP_SECONDS - 1)
+    fake.values = tuple(values) + (0, 0, 0, 0, 0, 0)
+
+    with pytest.raises(SensorReadError, match=r"outside the sensor's datasheet measurement range"):
+        sensor_cls().read()
+
+
 def test_not_ready_past_stale_threshold_restarts_measurement_mode(monkeypatch):
     # Simulates the real failure this recovery exists for: the chip
     # silently reverted to Idle-Mode (e.g. after an internal reset) and

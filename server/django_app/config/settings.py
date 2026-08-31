@@ -233,3 +233,21 @@ SUBSCRIPTION_MAX_DISTANCE_KM = float(os.environ.get("SUBSCRIPTION_MAX_DISTANCE_K
 NOMINATIM_USER_AGENT = os.environ.get(
     "NOMINATIM_USER_AGENT", "WeatherNet/1.0 (https://github.com/falberti/weathernet)"
 )
+
+# --- Telegram sensor-health alerts (telemetry app) ---
+# A single fixed recipient (the operator's own chat_id, from
+# @userinfobot or similar) -- deliberately separate from
+# WeatherSubscription's per-subscriber chat_ids above: this is an
+# operational alert about the hardware, not a weather digest for an
+# end user. Empty disables the check entirely (see
+# telemetry/management/commands/check_sensor_health.py), same
+# fail-loudly-by-skipping convention as TELEGRAM_BOT_TOKEN.
+TELEGRAM_ALERT_CHAT_ID = os.environ.get("TELEGRAM_ALERT_CHAT_ID", "")
+# How long a sensor_type can go without a fresh reading before it's
+# considered failed rather than just between reporting cycles. Padded
+# well past the probe's own report_interval_seconds (default 300s) and
+# its offline spool (weathernet_probe/spool.py) so a normal network
+# blip that the spool already absorbs doesn't also trigger a false
+# alert here -- this should only fire for a genuinely stuck sensor or a
+# probe that's been offline for a while.
+SENSOR_STALE_ALERT_MINUTES = int(os.environ.get("SENSOR_STALE_ALERT_MINUTES", "60"))

@@ -1,0 +1,16 @@
+[Unit]
+Description=Run the WeatherNet sensor-health check periodically
+
+[Timer]
+# Independent of the VM's local time (unlike the daily digest) --
+# staleness is just "now minus last reading", so there's no reason to
+# anchor this to a specific clock time. 15min: comfortably more often
+# than SENSOR_STALE_ALERT_MINUTES (default 60) so a real failure is
+# caught within a fraction of the alert window, not up to a whole
+# window late.
+OnBootSec=5min
+OnUnitActiveSec=15min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

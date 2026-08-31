@@ -72,6 +72,29 @@ _WARMUP_SECONDS = 10
 # transport is talking to it.
 _STALE_AFTER_SECONDS = 30
 
+# Sensirion's own datasheet ("Mass concentration output range"): 0 to
+# 1000 ug/m3 for every one of the four PM channels. A reading outside
+# this cannot be a real measurement -- it's a corrupted read (garbled
+# UART frame, a partial/misaligned response) that happened to unpack
+# into a plausible-looking float rather than raising struct.error. Real
+# incident this guards against: a corrupted read once produced tens of
+# thousands of ug/m3 across PM1.0-PM10, which silently polluted Grafana
+# with a spike far beyond anything physically possible before anyone
+# noticed.
+_PM_MASS_CONCENTRATION_RANGE_UG_M3 = (0.0, 1000.0)
+
+
+def _check_plausible(value: float, label: str) -> float:
+    low, high = _PM_MASS_CONCENTRATION_RANGE_UG_M3
+    if not (low <= value <= high):
+        raise SensorReadError(
+            f"SPS30 {label} reading {value}ug/m3 is outside the sensor's datasheet "
+            f"measurement range ({low}..{high}ug/m3) -- treating as a corrupted read, "
+            "not a real measurement"
+        )
+    return value
+
+
 # The chip only produces a new sample about once a second (in
 # continuous Measurement-Mode); caching a read for a couple of seconds
 # means the four PM Sensor subclasses below share one serial round trip
@@ -193,7 +216,7 @@ class SPS30PM1_0Sensor(Sensor):
     unit = "ug_m3"
 
     def read(self) -> float:
-        return round(_read_all()[0], 2)
+        return _check_plausible(round(_read_all()[0], 2), "PM1.0")
 
 
 class SPS30PM2_5Sensor(Sensor):
@@ -201,7 +224,7 @@ class SPS30PM2_5Sensor(Sensor):
     unit = "ug_m3"
 
     def read(self) -> float:
-        return round(_read_all()[1], 2)
+        return _check_plausible(round(_read_all()[1], 2), "PM2.5")
 
 
 class SPS30PM4_0Sensor(Sensor):
@@ -209,7 +232,7 @@ class SPS30PM4_0Sensor(Sensor):
     unit = "ug_m3"
 
     def read(self) -> float:
-        return round(_read_all()[2], 2)
+        return _check_plausible(round(_read_all()[2], 2), "PM4.0")
 
 
 class SPS30PM10Sensor(Sensor):
@@ -217,4 +240,4 @@ class SPS30PM10Sensor(Sensor):
     unit = "ug_m3"
 
     def read(self) -> float:
-        return round(_read_all()[3], 2)
+        return _check_plausible(round(_read_all()[3], 2), "PM10")

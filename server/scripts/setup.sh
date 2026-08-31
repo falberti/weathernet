@@ -227,6 +227,23 @@ else
   sudo systemctl enable --now weathernet-daily-digest.timer
 fi
 
+# --- 12b. Telegram sensor-health alert timer (telemetry app) ---
+# Same bot as the digest above, but a different, fixed recipient
+# (TELEGRAM_ALERT_CHAT_ID) and a much shorter period -- this is an
+# operational alert, not a subscriber feature, so it needs both the
+# bot token and its own recipient configured before it's worth
+# installing.
+if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_ALERT_CHAT_ID:-}" ]]; then
+  log "TELEGRAM_BOT_TOKEN and/or TELEGRAM_ALERT_CHAT_ID is not set -- skipping the sensor-health alert timer install." \
+      "Set both in .env and re-run this script to install it."
+else
+  log "Installing the sensor-health alert timer (runs every 15 minutes)"
+  sed "s|__SERVER_DIR__|${SERVER_DIR}|g" scripts/weathernet-sensor-health.service | sudo tee /etc/systemd/system/weathernet-sensor-health.service >/dev/null
+  sed "s|__SERVER_DIR__|${SERVER_DIR}|g" scripts/weathernet-sensor-health.timer | sudo tee /etc/systemd/system/weathernet-sensor-health.timer >/dev/null
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now weathernet-sensor-health.timer
+fi
+
 # --- 13. Summary ---
 cat <<SUMMARY
 
@@ -257,6 +274,15 @@ bot's @username as TELEGRAM_BOT_USERNAME), then:
   docker compose up -d telegram-bot
   ./scripts/setup.sh ${PUBLIC_IP}   # re-run to install the digest timer
 TELEGRAM
+fi)
+$(if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -z "${TELEGRAM_ALERT_CHAT_ID:-}" ]]; then cat <<SENSORALERT
+Telegram sensor-health alerts are NOT configured (TELEGRAM_ALERT_CHAT_ID
+is empty in .env) -- you won't be notified if a sensor stops reporting
+or a probe goes offline. To enable it: message @userinfobot (or
+similar) on Telegram to get your own numeric chat_id, paste it into
+.env as TELEGRAM_ALERT_CHAT_ID, then:
+  ./scripts/setup.sh ${PUBLIC_IP}   # re-run to install the alert timer
+SENSORALERT
 fi)
 
 Next step: add a probe. It's one command on the probe's side:

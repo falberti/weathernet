@@ -1,9 +1,15 @@
+import datetime
 import uuid
+from unittest.mock import patch
 
-from django.test import TestCase
+from django.core.management import call_command
+from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from probes.models import Probe
+
+from .models import SensorHealthAlert, SensorReading
 
 VALID_PAYLOAD = {
     "probe_id": None,
@@ -116,3 +122,95 @@ class IngestViewTests(TestCase):
         del payload["health"]
         response = self.post(payload, cn=str(self.probe.id))
         self.assertEqual(response.status_code, 400)
+
+
+def _reading(probe, sensor_type, age):
+    return SensorReading.objects.create(
+        probe=probe, sensor_type=sensor_type, time=timezone.now() - age, value=1.0
+    )
+
+
+@override_settings(TELEGRAM_ALERT_CHAT_ID="999", SENSOR_STALE_ALERT_MINUTES=30)
+class CheckSensorHealthTests(TestCase):
+    def setUp(self):
+        self.probe = Probe.objects.create(
+            name="garden-station-01",
+            hardware_type=Probe.HardwareType.RASPBERRY_PI_3,
+        )
+
+    @patch("telemetry.management.commands.check_sensor_health.send_message")
+    def test_disabled_when_chat_id_not_configured(self, mock_send):
+        with override_settings(TELEGRAM_ALERT_CHAT_ID=""):
+            _reading(self.probe, "temperature_c", datetime.timedelta(hours=2))
+            call_command("check_sensor_health")
+
+        mock_send.assert_not_called()
+
+    @patch("telemetry.management.commands.check_sensor_health.send_message")
+    def test_fresh_reading_never_alerts(self, mock_send):
+        _reading(self.probe, "temperature_c", datetime.timedelta(minutes=5))
+
+        call_command("check_sensor_health")
+
+        mock_send.assert_not_called()
+        self.assertEqual(SensorHealthAlert.objects.count(), 0)
+
+    @patch("telemetry.management.commands.check_sensor_health.send_message")
+    def test_stale_reading_sends_one_alert_and_records_it(self, mock_send):
+        _reading(self.probe, "sps30_pm2_5_ug_m3", datetime.timedelta(minutes=45))
+
+        call_command("check_sensor_health")
+
+        mock_send.assert_called_once()
+        chat_id, text = mock_send.call_args[0]
+        self.assertEqual(chat_id, "999")
+        self.assertIn("garden-station-01", text)
+        self.assertIn("sps30_pm2_5_ug_m3", text)
+        self.assertEqual(SensorHealthAlert.objects.filter(probe=self.probe, sensor_type="sps30_pm2_5_ug_m3").count(), 1)
+
+    @patch("telemetry.management.commands.check_sensor_health.send_message")
+    def test_stale_reading_does_not_realert_while_still_stale(self, mock_send):
+        _reading(self.probe, "temperature_c", datetime.timedelta(minutes=45))
+
+        call_command("check_sensor_health")
+        call_command("check_sensor_health")
+
+        mock_send.assert_called_once()
+
+    @patch("telemetry.management.commands.check_sensor_health.send_message")
+    def test_recovered_sensor_sends_recovery_message_and_clears_alert(self, mock_send):
+        _reading(self.probe, "temperature_c", datetime.timedelta(minutes=45))
+        call_command("check_sensor_health")
+        self.assertEqual(SensorHealthAlert.objects.count(), 1)
+
+        _reading(self.probe, "temperature_c", datetime.timedelta(minutes=1))
+        call_command("check_sensor_health")
+
+        self.assertEqual(mock_send.call_count, 2)
+        chat_id, text = mock_send.call_args[0]
+        self.assertIn("ha ripreso", text)
+        self.assertEqual(SensorHealthAlert.objects.count(), 0)
+
+    @patch("telemetry.management.commands.check_sensor_health.send_message")
+    def test_inactive_probe_is_never_checked(self, mock_send):
+        self.probe.is_active = False
+        self.probe.save(update_fields=["is_active"])
+        _reading(self.probe, "temperature_c", datetime.timedelta(minutes=45))
+
+        call_command("check_sensor_health")
+
+        mock_send.assert_not_called()
+
+    @patch("telemetry.management.commands.check_sensor_health.send_message")
+    def test_deactivating_probe_clears_its_open_alert_without_a_recovery_message(self, mock_send):
+        _reading(self.probe, "temperature_c", datetime.timedelta(minutes=45))
+        call_command("check_sensor_health")
+        self.assertEqual(SensorHealthAlert.objects.count(), 1)
+        mock_send.reset_mock()
+
+        self.probe.is_active = False
+        self.probe.save(update_fields=["is_active"])
+        call_command("check_sensor_health")
+
+        mock_send.assert_not_called()
+        self.assertEqual(SensorHealthAlert.objects.count(), 0)

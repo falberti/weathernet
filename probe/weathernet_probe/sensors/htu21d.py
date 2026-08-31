@@ -36,6 +36,19 @@ _I2C_ADDRESS = 0x40
 _CMD_TRIGGER_TEMPERATURE_NOHOLD = 0xF3
 _CMD_TRIGGER_HUMIDITY_NOHOLD = 0xF5
 
+# TE Connectivity's own operating range (HTU21D(F) datasheet, "Operating
+# Conditions"): a reading outside these bounds cannot be a real
+# measurement -- it's a corrupted read that passed the CRC-8 check
+# below (checksums catch bit errors in transit, not a chip that
+# converted garbage in the first place) but is still physically
+# impossible. The humidity formula is known to overshoot slightly past
+# 0/100% right at the physical extremes (per the same datasheet) --
+# that's a normal artifact of the linear fit, not corruption, so the
+# plausible range is padded a few points past 0/100 to still accept it
+# rather than rejecting a legitimate near-boundary reading.
+_TEMPERATURE_RANGE_C = (-40.0, 125.0)
+_HUMIDITY_PLAUSIBLE_RANGE_PCT = (-5.0, 105.0)
+
 # Datasheet max conversion times at the chip's default (14-bit
 # temperature / 12-bit humidity) resolution, with a small margin.
 _TEMPERATURE_CONVERSION_SECONDS = 0.06
@@ -93,13 +106,24 @@ def _read_measurement(command: int, delay_seconds: float) -> int:
         return ((msb << 8) | lsb) & 0xFFFC
 
 
+def _check_plausible(value: float, value_range: tuple, label: str, unit: str) -> float:
+    low, high = value_range
+    if not (low <= value <= high):
+        raise SensorReadError(
+            f"HTU21D-F {label} reading {value}{unit} is outside the sensor's plausible range "
+            f"({low}..{high}{unit}) -- treating as a corrupted read, not a real measurement"
+        )
+    return value
+
+
 class HTU21DTemperatureSensor(Sensor):
     sensor_type = "htu21d_temperature_c"
     unit = "c"
 
     def read(self) -> float:
         raw = _read_measurement(_CMD_TRIGGER_TEMPERATURE_NOHOLD, _TEMPERATURE_CONVERSION_SECONDS)
-        return round(-46.85 + 175.72 * raw / 65536.0, 2)
+        value = round(-46.85 + 175.72 * raw / 65536.0, 2)
+        return _check_plausible(value, _TEMPERATURE_RANGE_C, "temperature", "C")
 
 
 class HTU21DHumiditySensor(Sensor):
@@ -108,5 +132,10 @@ class HTU21DHumiditySensor(Sensor):
 
     def read(self) -> float:
         raw = _read_measurement(_CMD_TRIGGER_HUMIDITY_NOHOLD, _HUMIDITY_CONVERSION_SECONDS)
-        humidity = -6.0 + 125.0 * raw / 65536.0
+        humidity = round(-6.0 + 125.0 * raw / 65536.0, 2)
+        _check_plausible(humidity, _HUMIDITY_PLAUSIBLE_RANGE_PCT, "humidity", "%")
+        # Clamp the formula's known small overshoot at the physical
+        # extremes (already confirmed plausible above) to a valid
+        # percentage -- corrupted/implausible values were already
+        # rejected by _check_plausible and never reach this line.
         return round(max(0.0, min(100.0, humidity)), 2)
